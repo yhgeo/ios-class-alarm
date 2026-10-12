@@ -168,6 +168,8 @@ jobs:
             -framework Security \
             -framework AppIntents
           file "$APP/XiangKe"
+          echo "--- Swift 运行时链接情况（应能看到 /usr/lib/swift/...）---"
+          otool -L "$APP/XiangKe" | head -20 || true
 
           cp Sources/Info.plist "$APP/Info.plist"
           cp Resources/AppIcon*.png "$APP/"
@@ -235,10 +237,10 @@ jobs:
             rm -rf "$APP/Metadata.appintents"
             base_args "$@" || true
             if [ -d "$APP/Metadata.appintents" ]; then
-              echo "✓ 成功（$label）"
+              echo "✓ 成功 [${label}]"
               return 0
             fi
-            echo "· 未产出（$label）"
+            echo "· 未产出 [${label}]"
             return 1
           }
 
