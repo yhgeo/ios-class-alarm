@@ -20,36 +20,137 @@ jobs:
       - name: Install ldid
         run: brew install ldid
 
-      - name: Compile with clang
+      - name: Compile ObjC + Swift
         run: |
           set -euo pipefail
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "iOS SDK: $SDK"
+          xcodebuild -version || true
+
           APP="out/Payload/XiangKe.app"
-          mkdir -p "$APP"
-          SOURCES=$(find Sources -name '*.m' -print | sort | tr '\n' ' ')
-          echo "源文件: $SOURCES"
-          xcrun --sdk iphoneos clang \
-            -arch arm64 \
-            -isysroot "$SDK" \
-            -miphoneos-version-min=16.0 \
-            -fobjc-arc \
-            -O1 \
-            -ISources \
+          OBJ="build/obj"
+          rm -rf build
+          mkdir -p "$APP" "$OBJ"
+
+          # ---------- 1) ObjC → .o ----------
+          # 改为逐个编译：Swift 那部分要单独编译，最后一起链接
+          for f in $(find Sources -name '*.m' -print | sort); do
+            echo "  clang $(basename "$f")"
+            xcrun --sdk iphoneos clang \
+              -arch arm64 -isysroot "$SDK" \
+              -miphoneos-version-min=16.0 -fobjc-arc -O1 -ISources \
+              -c "$f" -o "$OBJ/$(basename "$f" .m).o"
+          done
+
+          # ---------- 2) Swift → .o ----------
+          # App Intents 的元数据提取依赖常量值 sidecar（.swiftconstvalues）。
+          # 该 flag 在较老的 Xcode 上可能不存在，所以失败就退回普通编译。
+          CV="$OBJ/XiangKeIntent.swiftconstvalues"
+          if xcrun --sdk iphoneos swiftc \
+               -target arm64-apple-ios16.0 -sdk "$SDK" -O \
+               -module-name XiangKe -parse-as-library \
+               -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+               -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
+               2> build/swift-err.log; then
+            echo "✓ Swift 编译完成（含常量值 sidecar）"
+          else
+            echo "⚠️ 带 -emit-const-values-path 失败，退回普通编译："
+            cat build/swift-err.log || true
+            xcrun --sdk iphoneos swiftc \
+              -target arm64-apple-ios16.0 -sdk "$SDK" -O \
+              -module-name XiangKe -parse-as-library \
+              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o"
+          fi
+          echo "--- objects ---"
+          ls -la "$OBJ"
+
+          # ---------- 3) 链接 ----------
+          # 用 swiftc 当链接器驱动，它才会自动带上 Swift 运行时
+          OBJS=$(find "$OBJ" -name '*.o' -print | sort | tr '\n' ' ')
+          xcrun --sdk iphoneos swiftc \
+            -target arm64-apple-ios16.0 -sdk "$SDK" -module-name XiangKe \
+            -L "$SDK/usr/lib/swift" \
+            -Xlinker -rpath -Xlinker /usr/lib/swift \
+            -o "$APP/XiangKe" $OBJS \
             -framework UIKit \
             -framework Foundation \
             -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
             -framework BackgroundTasks \
             -framework Security \
-            -o "$APP/XiangKe" \
-            $SOURCES
+            -framework AppIntents
+          file "$APP/XiangKe"
+
           cp Sources/Info.plist "$APP/Info.plist"
           cp Resources/AppIcon*.png "$APP/"
           printf 'APPL????' > "$APP/PkgInfo"
           echo "--- app bundle ---"
           ls -la "$APP"
-          file "$APP/XiangKe"
+
+      - name: Extract App Intents metadata
+        run: |
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          APP="$PWD/out/Payload/XiangKe.app"
+
+          TOOLCHAIN="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
+          PROC="$TOOLCHAIN/usr/bin/appintentsmetadataprocessor"
+          if [ ! -x "$PROC" ]; then
+            PROC=$(find /Applications -name appintentsmetadataprocessor -type f 2>/dev/null | head -1)
+          fi
+          echo "processor = ${PROC:-<未找到>}"
+          [ -x "$PROC" ] || { echo "❌ 找不到 appintentsmetadataprocessor"; exit 1; }
+
+          find Sources -name '*.swift' > build/SwiftFileList
+
+          CV="$PWD/build/obj/XiangKeIntent.swiftconstvalues"
+          CVFLAGS=()
+          if [ -f "$CV" ]; then
+            echo "$CV" > build/SwiftConstValuesFileList
+            CVFLAGS=(--swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
+                     --compile-time-extraction)
+            echo "✓ 找到常量值 sidecar，启用编译期提取"
+          else
+            echo "· 没有常量值 sidecar，退回运行期提取"
+          fi
+
+          echo "===== processor --help ====="
+          "$PROC" --help 2>&1 | head -80 || true
+          echo "==========================="
+
+          run_proc() {
+            "$PROC" \
+              --toolchain-dir "$TOOLCHAIN" \
+              --module-name XiangKe \
+              --sdk-root "$SDK" \
+              --platform-family iOS \
+              --deployment-target 16.0 \
+              --bundle-identifier com.yhgeo.alarmpoc \
+              --output "$APP" \
+              --target-triple arm64-apple-ios16.0 \
+              --binary-file "$APP/XiangKe" \
+              --source-file-list "$PWD/build/SwiftFileList" \
+              --no-app-shortcuts-localization \
+              "$@"
+          }
+
+          if run_proc ${CVFLAGS[@]+"${CVFLAGS[@]}"}; then
+            echo "✓ 元数据生成成功（完整参数）"
+          else
+            echo "⚠️ 完整参数失败，改用最小参数集重试"
+            if run_proc; then
+              echo "✓ 元数据生成成功（最小参数）"
+            else
+              echo "❌ 元数据生成失败"
+              exit 1
+            fi
+          fi
+
+          echo "--- Metadata.appintents ---"
+          ls -la "$APP/Metadata.appintents"
+          echo "--- 元数据里是否含我们的意图 ---"
+          strings "$APP/Metadata.appintents/extract.actionsdata" 2>/dev/null \
+            | grep -i "XiangKeProbe" || echo "(未找到 XiangKeProbe 字样)"
 
       - name: Inject entitlements and package IPA
         run: |
