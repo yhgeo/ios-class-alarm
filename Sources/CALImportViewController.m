@@ -242,8 +242,31 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 #pragma mark - UIPasteConfigurationSupporting
 
 /// UIPasteControl 被点击后，系统把剪贴板内容以 NSItemProvider 交到这里。
-/// 此时已经过用户授权，不会再弹权限框。
+/// 此时用户已经表达过粘贴意图，系统不会再弹权限框。
 - (void)pasteItemProviders:(NSArray<NSItemProvider *> *)itemProviders {
+    NSMutableString *trace = [NSMutableString string];
+
+    // 路径 1：直接读剪贴板。
+    // 这是首选 —— 用户已通过 UIPasteControl 授权，直接读不会弹框；
+    // 同时绕开 NSItemProvider 在本环境下的加载失败
+    // （实测报错：Cannot load representation of type public.utf8-plain-text）。
+    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+    NSString *text = nil;
+
+    if (pasteboard.hasStrings) {
+        text = pasteboard.string;
+        if (text.length == 0) text = pasteboard.strings.firstObject;
+        [trace appendFormat:@"· 直接读取剪贴板：%@\n", text.length > 0 ? @"成功" : @"拿到空值"];
+    } else {
+        [trace appendString:@"· 直接读取剪贴板：系统报告没有文本\n"];
+    }
+
+    if (text.length > 0) {
+        [self fillWithText:text];
+        return;
+    }
+
+    // 路径 2：退回到系统交过来的 NSItemProvider
     NSItemProvider *provider = nil;
     for (NSItemProvider *p in itemProviders) {
         if ([p canLoadObjectOfClass:[NSString class]]) {
@@ -253,30 +276,39 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     }
 
     if (!provider) {
-        [self alertWithTitle:@"拿不到文本"
-                     message:(itemProviders.count == 0
-                                ? @"剪贴板里没有内容。先去别处复制课表地址再回来。"
-                                : @"剪贴板里的内容不是文字。")];
+        [trace appendFormat:@"· 系统提供的数据：%lu 项，没有文本类型\n",
+                             (unsigned long)itemProviders.count];
+        [self alertWithTitle:@"拿不到文本" message:trace];
         return;
     }
 
     __weak typeof(self) weakSelf = self;
     [provider loadObjectOfClass:[NSString class]
               completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
-        NSString *text = [object isKindOfClass:[NSString class]] ? (NSString *)object : nil;
-        NSString *trimmed = [text stringByTrimmingCharactersInSet:
-                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSString *loaded = [object isKindOfClass:[NSString class]] ? (NSString *)object : nil;
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (trimmed.length == 0) {
-                [weakSelf alertWithTitle:@"拿不到文本"
-                                 message:error.localizedDescription ?: @"剪贴板内容为空。"];
+            if (loaded.length > 0) {
+                [weakSelf fillWithText:loaded];
                 return;
             }
-            weakSelf.textView.text = trimmed;
-            [weakSelf updatePlaceholder];
+            [trace appendFormat:@"· 系统提供的数据：%@\n",
+                                 error.localizedDescription ?: @"返回空"];
+            [weakSelf alertWithTitle:@"拿不到文本" message:trace];
         });
     }];
+}
+
+/// 把拿到的文本填进输入框
+- (void)fillWithText:(NSString *)text {
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:
+                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0) {
+        [self alertWithTitle:@"拿不到文本" message:@"剪贴板里没有文字内容。"];
+        return;
+    }
+    self.textView.text = trimmed;
+    [self updatePlaceholder];
 }
 
 #pragma mark - UIDocumentPickerDelegate
