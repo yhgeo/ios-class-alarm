@@ -28,9 +28,11 @@
 | `CALDaemonReloader.h/.m` | 让 mobiletimerd 重新加载数据（换方案只改这里） |
 | `CALScheduleEngine.h/.m` | 纯计算：课表 → 目标时间（无副作用） |
 | `CALApplier.h/.m` | 协调层，唯一知道完整流程的模块 |
-| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 导入 / 示例 / 自检 / 清理 |
-| `CALTimetableViewController.h/.m` | 课表列表：按星期分组，增删改 + 提前量 |
+| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 导入 / 清理 / 设置 |
+| `CALTimetableViewController.h/.m` | 课表编辑：分段控件切换「每周课表」/「自定义课表」 |
 | `CALCourseEditorViewController.h/.m` | 单节课编辑表单（只收集输入并回调） |
+| `CALSettingsViewController.h/.m` | 设置：提前提醒 / 载入示例课表 / 存储自检 |
+| `CALImportViewController.h/.m` | 导入课表：URL 下载 / 从「文件」选本地 JSON |
 | `CALPaddedLabel.h/.m` | 带内边距的 UILabel（通用小组件） |
 | `main.m` | 入口与装配（导航栈 + URL Scheme 处理） |
 | `Resources/AppIcon*.png` | App 图标（8 个尺寸，构建时拷进 .app） |
@@ -103,11 +105,23 @@ zip -r XiangKe.ipa Payload
 **剪贴板（iOS 16）**
 - iOS 16 起，**程序化读取 `UIPasteboard` 会弹权限框**；用户一旦拒绝，之后**静默返回空**，
   且不再提示 —— 表现为「剪贴板是空的」，很容易误判成剪贴板真的没内容
-- 正确做法是用 **`UIPasteControl`**（iOS 16 新增的系统控件）：用户点击即代表授权，
-  不弹框、必定可读；剪贴板为空时它会**自动置灰**，正好当状态提示
-  - `paste.target = <目标 responder>`，系统会把内容直接交给目标（如 `UITextView`）
-- 兜底方案：`UIDocumentPickerViewController` 选本地文件，完全不碰剪贴板
-- `UIPasteboard.changeCount` 不需要权限，可用来区分「剪贴板真的空」和「读取被拒」
+- **但在 TrollStore 环境下这条路整体走不通**（实测 `hasStrings` 为真、取值恒为空）：
+  - 直接读 `UIPasteboard.string` → 空值
+  - `UIPasteControl`（配好 `pasteConfiguration` 后按钮可点、回调正常触发）→
+    内部 `loadObjectOfClass:` 报 `Cannot load representation of type public.utf8-plain-text`
+  - `loadDataRepresentationForTypeIdentifier:` 直接取原始 data → 同样拿不到
+  - 佐证：TrollStore 上的剪贴板同步项目 `daxia25881/Clip-` 也必须依赖 **CopyLog**
+    把剪贴板落成文件才能读到
+- **结论：不要依赖剪贴板**。要么让用户长按输入框手动粘贴，要么改用文件导入
+- `UIPasteControl` 若要用，**target 的 `pasteConfiguration` 必须非 nil**，
+  否则控件一直置灰、点击无反应
+
+**文件选择器（UIDocumentPickerViewController）**
+- **`asCopy:YES` 在 `no-sandbox` 下会让选择器里文件全部不可选** ——
+  它需要系统把文件拷进 App 容器，而本 App 没有常规容器路径。
+  改用 `asCopy:NO`（就地打开），读取时配 `startAccessingSecurityScopedResource`
+- **类型限制不要写太窄**：只写 `UTTypeJSON` 时，系统未识别成 `public.json` 的文件
+  （如从聊天软件存下来的）会灰显、点不动。放宽到 `UTTypeData` 更稳
 
 **UI**
 - **iOS App 图标不能带 alpha 通道**，否则整张图渲染成黑块。源图若是透明底，必须先合成到实色背景再转 RGB
