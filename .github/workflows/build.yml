@@ -78,6 +78,19 @@ jobs:
           gen_sidecar "A driver -Xfrontend" \
               -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
 
+          # A2：加上 -emit-module（Xcode 的调用里始终带它，可能正是发射的前置条件）
+          if [ ! -f "$CV" ]; then
+            echo "--- 尝试 A2：driver + -emit-module ---"
+            rm -f "$OBJ/XiangKeIntent.o" "$CV"
+            xcrun --sdk iphoneos swiftc \
+              -target arm64-apple-ios16.0 -sdk "$SDK" \
+              -module-name XiangKe -parse-as-library -swift-version 5 \
+              -emit-module -emit-module-path "$OBJ/XiangKe.swiftmodule" \
+              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" 2>&1 | head -10 || true
+            if [ -f "$CV" ]; then echo "✓ A2 成功"; else echo "· A2 未产出"; fi
+          fi
+
           # 诊断：看驱动究竟怎么调前端（模式、是否带 -primary-file）
           if [ ! -f "$CV" ]; then
             echo "--- swiftc -### （前端真实命令行）---"
@@ -125,6 +138,9 @@ jobs:
               -module-name XiangKe -parse-as-library \
               -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o"
           fi
+
+          echo "--- 全仓库搜索 *.swiftconstvalues ---"
+          find . -name '*.swiftconstvalues' 2>/dev/null | head || true
 
           if [ -f "$CV" ]; then
             echo "--- sidecar 内容（前 40 行）---"
@@ -211,23 +227,34 @@ jobs:
               "$@"
           }
 
+          # 注意：该处理器在「什么都没提取到」时**也返回 0**，
+          # 所以成功判据只能是「输出目录是否真的出现」，不能看退出码。
+          attempt() {
+            label="$1"; shift
+            echo "===== 尝试：$label ====="
+            rm -rf "$APP/Metadata.appintents"
+            base_args "$@" || true
+            if [ -d "$APP/Metadata.appintents" ]; then
+              echo "✓ 成功（$label）"
+              return 0
+            fi
+            echo "· 未产出（$label）"
+            return 1
+          }
+
           ok=0
           if [ "$HAS_CV" -eq 1 ]; then
-            echo "===== 尝试：编译期提取（带常量值 sidecar）====="
-            if base_args --swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
-                         --compile-time-extraction; then
-              ok=1
-            fi
+            if attempt "编译期提取" \
+                 --swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
+                 --compile-time-extraction; then ok=1; fi
           fi
 
           if [ "$ok" -ne 1 ]; then
-            echo "===== 尝试：默认提取 ====="
-            if base_args; then ok=1; fi
+            if attempt "默认提取"; then ok=1; fi
           fi
 
           if [ "$ok" -ne 1 ]; then
-            echo "===== 尝试：legacy 提取（扫二进制）====="
-            if base_args --legacy-extraction; then ok=1; fi
+            if attempt "legacy 提取（扫二进制）" --legacy-extraction; then ok=1; fi
           fi
 
           if [ "$ok" -ne 1 ]; then
