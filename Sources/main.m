@@ -21,6 +21,11 @@
 #import <xpc/xpc.h>
 #import <Security/Security.h>
 
+// SecTask 系列属于 Security.framework 的私有 API，公开头文件未导出，需手动声明
+typedef struct CF_BRIDGED_TYPE(id) __SecTask *SecTaskRef;
+extern SecTaskRef SecTaskCreateFromSelf(CFAllocatorRef allocator);
+extern CFTypeRef SecTaskCopyValueForEntitlement(SecTaskRef task, CFStringRef entitlement, CFErrorRef *error);
+
 typedef id   (*Send_Id)(id, SEL);
 typedef id   (*Send_Id_Id)(id, SEL, id);
 typedef void (*Send_Void_Id)(id, SEL, id);
