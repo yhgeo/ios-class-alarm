@@ -46,7 +46,8 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 
 #pragma mark -
 
-@interface CALImportViewController () <UITextViewDelegate, UIDocumentPickerDelegate>
+@interface CALImportViewController () <UITextViewDelegate, UIDocumentPickerDelegate,
+                                       UIPasteConfigurationSupporting>
 @property (nonatomic, strong) UILabel *hintLabel;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UILabel *placeholderLabel;
@@ -118,14 +119,21 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 
     // 系统粘贴控件：用户点击即代表授权，不会弹权限框；
     // 剪贴板为空时它会自动置灰，正好当状态提示用。
+    //
+    // 关键：UIPasteControl 靠 target 的 pasteConfiguration 判断「能接受什么类型」。
+    // UIViewController 的这个属性默认是 nil —— 不显式设置的话，系统认为什么都接不了，
+    // 按钮会一直置灰、点了毫无反应。所以这里必须配，并由我们自己实现 pasteItemProviders:。
     if (@available(iOS 16.0, *)) {
+        self.pasteConfiguration = [[UIPasteConfiguration alloc]
+            initWithTypeIdentifiersForAcceptingClass:[NSString class]];
+
         UIPasteControlConfiguration *config = [[UIPasteControlConfiguration alloc] init];
         config.displayMode = UIPasteControlDisplayModeIconAndLabel;
         config.baseBackgroundColor = [UIColor secondarySystemBackgroundColor];
         config.baseForegroundColor = [UIColor labelColor];
 
         UIPasteControl *paste = [[UIPasteControl alloc] initWithConfiguration:config];
-        paste.target = self.textView;   // 由系统把剪贴板内容直接交给输入框
+        paste.target = self;
         self.pasteControl = paste;
         [self.view addSubview:paste];
     }
@@ -146,9 +154,9 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     self.footnoteLabel.font = [UIFont systemFontOfSize:12];
     self.footnoteLabel.textColor = [UIColor tertiaryLabelColor];
     self.footnoteLabel.text =
-        @"粘贴按钮变灰 = 剪贴板里没有文字。\n"
-        @"支持 GitHub Gist：填 gist 页面地址会自动补 /raw。\n"
-        @"只接受 https；导入会整体替换当前课表。";
+        @"粘贴按钮是灰的 = 剪贴板里没有文字（先去别处复制地址）。\n"
+        @"粘贴和长按都不行的话，用「从「文件」选 JSON」——那条路不碰剪贴板。\n"
+        @"支持 GitHub Gist：填 gist 页面地址会自动补 /raw；只接受 https。";
     [self.view addSubview:self.footnoteLabel];
 }
 
@@ -229,6 +237,46 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 
 - (void)textViewDidChange:(UITextView *)textView {
     [self updatePlaceholder];
+}
+
+#pragma mark - UIPasteConfigurationSupporting
+
+/// UIPasteControl 被点击后，系统把剪贴板内容以 NSItemProvider 交到这里。
+/// 此时已经过用户授权，不会再弹权限框。
+- (void)pasteItemProviders:(NSArray<NSItemProvider *> *)itemProviders {
+    NSItemProvider *provider = nil;
+    for (NSItemProvider *p in itemProviders) {
+        if ([p canLoadObjectOfClass:[NSString class]]) {
+            provider = p;
+            break;
+        }
+    }
+
+    if (!provider) {
+        [self alertWithTitle:@"拿不到文本"
+                     message:(itemProviders.count == 0
+                                ? @"剪贴板里没有内容。先去别处复制课表地址再回来。"
+                                : @"剪贴板里的内容不是文字。")];
+        return;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    [provider loadObjectOfClass:[NSString class]
+              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
+        NSString *text = [object isKindOfClass:[NSString class]] ? (NSString *)object : nil;
+        NSString *trimmed = [text stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (trimmed.length == 0) {
+                [weakSelf alertWithTitle:@"拿不到文本"
+                                 message:error.localizedDescription ?: @"剪贴板内容为空。"];
+                return;
+            }
+            weakSelf.textView.text = trimmed;
+            [weakSelf updatePlaceholder];
+        });
+    }];
 }
 
 #pragma mark - UIDocumentPickerDelegate
