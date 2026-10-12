@@ -3,14 +3,11 @@
 //
 
 #import "CALProbe.h"
+#import "CALPrivateAPI.h"
 #import <UIKit/UIKit.h>
 
 /// 必须与 XiangKeIntent.swift 里的同名常量一致
 static NSString * const kProbeFileName = @"xiangke-probe.log";
-
-/// 闹钟数据就存在这里。锁屏时能不能碰它，决定整套方案是否成立。
-static NSString * const kMobileTimerPlist =
-    @"/var/mobile/Library/Preferences/com.apple.mobiletimer.plist";
 
 @implementation CALProbe
 
@@ -101,14 +98,14 @@ static NSString * const kMobileTimerPlist =
 
 + (NSString *)describeTargetFile {
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:kMobileTimerPlist]) {
-        return [NSString stringWithFormat:@"闹钟数据文件：不存在（%@）", kMobileTimerPlist];
+    if (![fm fileExistsAtPath:CAL_ALARM_PLIST_PATH]) {
+        return [NSString stringWithFormat:@"闹钟数据文件：不存在（%@）", CAL_ALARM_PLIST_PATH];
     }
 
-    NSDictionary *attr = [fm attributesOfItemAtPath:kMobileTimerPlist error:nil];
+    NSDictionary *attr = [fm attributesOfItemAtPath:CAL_ALARM_PLIST_PATH error:nil];
     unsigned long long size = [attr[NSFileSize] unsignedLongLongValue];
     NSString *protection = attr[NSFileProtectionKey] ?: @"(未设置)";
-    NSData *content = [NSData dataWithContentsOfFile:kMobileTimerPlist];
+    NSData *content = [NSData dataWithContentsOfFile:CAL_ALARM_PLIST_PATH];
     BOOL readable = content.length > 0;
 
     return [NSString stringWithFormat:

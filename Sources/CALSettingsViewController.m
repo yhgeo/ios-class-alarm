@@ -118,7 +118,7 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
     switch (section) {
         case CALSettingSectionAlarm:       return @"闹钟";
         case CALSettingSectionTimetable:   return @"课表";
-        case CALSettingSectionIntentProbe: return @"锁屏自动化";
+        case CALSettingSectionIntentProbe: return @"锁屏探针";
         case CALSettingSectionDiagnostics: return @"诊断";
         case CALSettingSectionReload:      return @"重载诊断";
         default: return nil;
@@ -132,8 +132,9 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
     }
     if (section == CALSettingSectionIntentProbe) {
         return @"锁屏时系统禁止「打开 App / 打开 URL」，所以 xiangke://apply 在锁屏必定失败。\n"
-                "后台刷新与 App Intent 都能在锁屏下执行，但**能否读写系统文件**要实测 ——"
-                "系统偏好文件受数据保护限制，锁屏时可能直接读写失败。";
+                "App 被系统在后台唤醒时（锁屏也可能）会自动记一条，用来验证"
+                "「锁屏下能否读写系统文件」—— 系统偏好文件受数据保护限制，"
+                "这是整套方案能否在锁屏下工作的关键。";
     }
     if (section == CALSettingSectionDiagnostics) {
         return @"课表保存在磁盘上，重启 App 不会丢。保存失败会在这里显示原因。";

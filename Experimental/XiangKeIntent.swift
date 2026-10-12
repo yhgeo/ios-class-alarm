@@ -2,6 +2,27 @@
 //  XiangKeIntent.swift
 //  响课（XiangKe）— App Intent 锁屏探针
 //
+//  ⚠️ 本文件当前**不参与编译**，放在 Experimental/ 下备查。
+//
+//  为什么搁置（2026-10-12 实测结论）：
+//  App Intent 动作要出现在「快捷指令」里，App 包内必须有
+//  Metadata.appintents/extract.actionsdata；而生成它需要 Xcode 的
+//  appintentsmetadataprocessor 配合**编译器产出的常量值 sidecar**
+//  （.swiftconstvalues）。处理器原话：
+//      No swift const values found. If SWIFT_ENABLE_EMIT_CONST_VALUES = NO,
+//      AppIntents metadata cannot be extracted.
+//  在纯 clang/swiftc 命令行构建下，这个 sidecar 生不出来：
+//    · 触发发射的是**驱动层**开关 -emit-const-values（不是前端 flag，
+//      所以 swift-frontend -help 里看不到它；驱动会自己补
+//      -emit-const-values-path，-### 已证实）
+//    · 加上 -emit-const-values 后，swiftc 直接 Segmentation fault: 11
+//    · 去掉 -parse-as-library 则不崩，但单文件会被当成主文件而生成 _main，
+//      与 ObjC 的 main 冲突（duplicate symbol '_main'）
+//  若将来要重启这件事，可行路径是引入真正的 Xcode 工程（或用 xcodegen
+//  生成 .xcodeproj）让 Xcode 自己跑这套构建步骤，再把生成的
+//  Metadata.appintents 拷进手工打包的 bundle。
+//
+//  代码本身保留完整，逻辑无需改动：
 //  目的（最小验证）：确认「App Intent 动作」能否在**锁屏状态**下被快捷指令自动化执行，
 //  以及执行时能否访问 /var/mobile/Library/Preferences 下的系统文件。
 //
@@ -12,7 +33,8 @@
 //  这一层只能实测，推理不出来。
 //
 //  本文件是**纯 Swift、零依赖**（不引用任何 CAL* 模块），把引入 Swift 混编的风险压到最低。
-//  探针结果写入 xiangke-probe.log，由 ObjC 侧的设置页读取显示。
+//  探针结果写入 xiangke-probe.log，由 ObjC 侧的设置页读取显示
+//  （同一套探针逻辑另有 ObjC 版：Sources/CALProbe.m，已接在后台刷新上）。
 //
 
 import Foundation
@@ -23,7 +45,8 @@ import AppIntents
 let kXiangKeProbeFileName = "xiangke-probe.log"
 
 /// 真正的目标文件 —— 闹钟数据就存在这里。锁屏时能不能碰它，是整个方案的成败关键。
-private let kMobileTimerPlist = "/var/mobile/Library/Preferences/com.apple.mobiletimer.plist"
+/// （与 CALPrivateAPI.h 的 CAL_ALARM_PLIST_PATH 保持一致）
+private let kMobileTimerPlist = "/var/mobile/Library/Preferences/com.apple.mobiletimerd.plist"
 
 // MARK: - 探针逻辑
 

@@ -14,6 +14,9 @@
 | 远程 JSON 导入（URL） | ✅ 已完成 |
 | 快捷指令唤起（URL Scheme） | ✅ 已完成 |
 | 应用名 / 图标 | ✅ 已完成 |
+| 后台自动刷新（锁屏也能跑） | ✅ 已完成 |
+| 锁屏探针（验证锁屏下能否读写系统文件） | ✅ 已完成 |
+| App Intent 动作（锁屏 + 时间精确） | ⛔ 受阻，见下 |
 | 更优雅的重载方式（替代 SIGKILL） | ⬜ 待做 |
 
 ## 模块结构
@@ -31,11 +34,13 @@
 | `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 导入 / 清理 / 设置 |
 | `CALTimetableViewController.h/.m` | 课表编辑：分段控件切换「每周课表」/「自定义课表」 |
 | `CALCourseEditorViewController.h/.m` | 单节课编辑表单（只收集输入并回调） |
-| `CALSettingsViewController.h/.m` | 设置：提前提醒 / 载入示例课表 / 存储自检 |
+| `CALSettingsViewController.h/.m` | 设置：提前提醒 / 载入示例课表 / 存储自检 / 重载诊断 / 锁屏探针 |
 | `CALImportViewController.h/.m` | 导入课表：URL 下载 / 从「文件」选本地 JSON |
+| `CALProbe.h/.m` | 锁屏探针：判断是否锁屏 + 探测系统文件可访问性 |
 | `CALPaddedLabel.h/.m` | 带内边距的 UILabel（通用小组件） |
-| `main.m` | 入口与装配（导航栈 + URL Scheme 处理） |
+| `main.m` | 入口与装配（导航栈 + URL Scheme + 后台刷新） |
 | `Resources/AppIcon*.png` | App 图标（8 个尺寸，构建时拷进 .app） |
+| `Experimental/` | 不参与编译的实验性代码（见「App Intent 方案」） |
 
 ## 工作原理
 
@@ -79,6 +84,73 @@ cp Resources/AppIcon*.png XiangKe.app/
 ldid -Sentitlements.plist XiangKe.app/XiangKe
 zip -r XiangKe.ipa Payload
 ```
+
+## App Intent 锁屏方案（已搁置）
+
+**目标**：让动作直接出现在「快捷指令」里，从而在**锁屏**下也能定时执行。
+`xiangke://apply` 走的是「打开 URL」，而 iOS 锁屏时禁止打开 App / URL —— 这是系统硬限制。
+
+**结论**：代码层面可行（`openAppWhenRun = false` 时系统在后台拉起进程执行、不进入前台），
+但**元数据生不出来**，动作不会出现在快捷指令里。代码保留在
+`Experimental/XiangKeIntent.swift`，逻辑完整、无需改动。
+
+### 卡在哪
+
+App Intent 动作要被快捷指令发现，App 包内必须有
+`Metadata.appintents/extract.actionsdata`，由 Xcode 的 `appintentsmetadataprocessor`
+生成。该处理器需要**编译器产出的常量值 sidecar**（`.swiftconstvalues`），否则报错：
+
+```
+No swift const values found. If SWIFT_ENABLE_EMIT_CONST_VALUES = NO,
+AppIntents metadata cannot be extracted.
+```
+
+而这个 sidecar 在纯命令行构建下生不出来：
+
+1. 触发发射的是**驱动层**开关 `-emit-const-values`。它**不是**前端 flag，
+   所以 `swift-frontend -help` 里根本看不到它（只看得到 `-emit-const-values-path`）——
+   一开始就找错了方向。驱动收到 `-emit-const-values` 后会自己往前端补
+   `-emit-const-values-path`（`swiftc -###` 已证实）。
+2. 加上 `-emit-const-values` 后，**swiftc 直接 `Segmentation fault: 11`**。
+3. 去掉 `-parse-as-library` 就不崩，但 swiftc 会把**单个源文件当成主文件**，
+   于是生成 `_main`，与 ObjC 的 `main` 冲突（`duplicate symbol '_main'`）。
+   所以 `-parse-as-library` 不能去。
+
+试过且无效的写法：`-Xfrontend -emit-const-values-path`（参数能过、前端也确实收到，
+但什么都不写）、加 `-emit-module`、直接调 `swift-frontend -primary-file`、`-output-file-map`。
+
+另外两个容易踩的坑（都已在 CI 里踩过）：
+
+- 处理器在「什么都没提取到」时**退出码仍是 0**，成功判据只能是「输出目录是否真的出现」。
+- `echo "✓ 成功（$label）"` 这种写法在 `set -u` 下会报 `label: unbound variable` ——
+  bash 在某些 locale 下把全角括号当成了标识符的一部分。变量后紧跟非 ASCII 字符时
+  必须写 `${label}`。
+
+### 若将来重启
+
+让 Xcode 自己跑这套步骤，再取产物：用 `xcodegen`（brew 可装）生成一个最小
+`.xcodeproj`（一个 app target，只含这个 Swift 文件，module name 与主工程一致），
+`xcodebuild` 出包后把 `Metadata.appintents/` 拷进手工打包的 bundle。
+
+### 替代方案（当前采用）
+
+`BGTaskScheduler` 后台刷新。它同样在锁屏下执行，只是**时刻由系统决定、不精确**。
+设置「次日闹钟」只要当天跑过一次就够了，所以实际够用。
+
+| 方式 | 锁屏可用 | 时间精度 |
+|---|---|---|
+| 快捷指令 `xiangke://apply` | ❌ | 精确 |
+| 后台刷新 | ✅ | 系统择机，不精确 |
+
+### 还没回答的问题
+
+**锁屏时能否读写 `/var/mobile/Library/Preferences/com.apple.mobiletimerd.plist`？**
+系统偏好文件受数据保护（Data Protection）限制，锁屏时可能直接读写失败 ——
+若答案为否，那上面两种「锁屏可用」的方案都只是能跑起来、干不成活。
+
+`CALProbe` 就是为这个问题准备的：**设置 → 锁屏探针**。
+「跑一次探针」拿基准记录，「查看记录」看历次结果；后台刷新与 URL 唤起各会留一条。
+看 `isProtectedDataAvailable` 与 plist 的可读性即可判断。
 
 ## 踩坑记录
 

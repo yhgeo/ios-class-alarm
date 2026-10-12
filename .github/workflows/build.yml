@@ -8,6 +8,7 @@ on:
       - 'DEVELOPMENT.md'
       - '.gitignore'
       - '.workbuddy-ai/**'
+      - 'Experimental/**'
   workflow_dispatch:
 
 jobs:
@@ -20,236 +21,36 @@ jobs:
       - name: Install ldid
         run: brew install ldid
 
-      - name: Compile ObjC + Swift
+      - name: Compile with clang
         run: |
           set -euo pipefail
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "iOS SDK: $SDK"
-          xcodebuild -version || true
-
           APP="out/Payload/XiangKe.app"
-          OBJ="build/obj"
-          rm -rf build
-          mkdir -p "$APP" "$OBJ"
-
-          # ---------- 1) ObjC → .o ----------
-          # 改为逐个编译：Swift 那部分要单独编译，最后一起链接
-          for f in $(find Sources -name '*.m' -print | sort); do
-            echo "  clang $(basename "$f")"
-            xcrun --sdk iphoneos clang \
-              -arch arm64 -isysroot "$SDK" \
-              -miphoneos-version-min=16.0 -fobjc-arc -O1 -ISources \
-              -c "$f" -o "$OBJ/$(basename "$f" .m).o"
-          done
-
-          # ---------- 2) Swift → .o ----------
-          # App Intents 的元数据**必须**由编译器产出的常量值 sidecar 驱动
-          # （处理器会明确报错：No swift const values found ... cannot be extracted）。
-          #
-          # 关键：-emit-const-values 是**驱动层**开关，不是前端开关 ——
-          # 所以 swift-frontend -help 里根本看不到它；驱动收到它之后会自己
-          # 往前端补 -emit-const-values-path（见 swift-driver 的
-          # FrontendJobHelpers.swift）。此前只传前端路径的写法能过参数检查，
-          # 却什么都不写，正是踩了这个坑。
-          echo "===== swiftc（驱动）中 const-value 相关选项 ====="
-          xcrun --sdk iphoneos swiftc -help 2>&1 | grep -i "const-value" || echo "(无匹配)"
-          echo "=============================================="
-
-          CV="$OBJ/XiangKeIntent.swiftconstvalues"
-
-          gen_sidecar() {
-            label="$1"; shift
-            rm -f "$OBJ/XiangKeIntent.o"
-            find build -name '*.swiftconstvalues' -delete 2>/dev/null || true
-
-            xcrun --sdk iphoneos swiftc \
-              -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe \
-              "$@" -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
-              > build/swift-out.log 2>&1 || true
-
-            # -print -quit：找到第一个就停，避免 head 触发 SIGPIPE
-            found=$(find build -name '*.swiftconstvalues' -print -quit 2>/dev/null)
-            if [ -n "$found" ]; then
-              cp -f "$found" "$CV"
-              echo "✓ 常量值 sidecar 产出成功 ← [${label}]（来源 ${found}）"
-              return 0
-            fi
-            echo "· 未产出 ← [${label}]；编译器输出："
-            head -8 build/swift-out.log || true
-            return 1
-          }
-
-          # A：驱动层开关，不加 -parse-as-library
-          gen_sidecar "A -emit-const-values" -emit-const-values || true
-
-          # A2：驱动开关 + -parse-as-library
-          if [ ! -f "$CV" ]; then
-            gen_sidecar "A2 驱动开关 + parse-as-library" \
-              -emit-const-values -parse-as-library || true
-          fi
-
-          # B：历史写法（只给前端路径）
-          if [ ! -f "$CV" ]; then
-            gen_sidecar "B 仅前端路径" \
-              -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
-          fi
-
-          # 诊断：确认驱动是否真的往前端补了 -emit-const-values-path
-          if [ ! -f "$CV" ]; then
-            echo "--- swiftc -### 里的 const-values 参数 ---"
-            xcrun --sdk iphoneos swiftc \
-              -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library \
-              -emit-const-values \
-              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" -### 2>&1 \
-              | tr ' ' '\n' | grep -i "const-values" || echo "(驱动没补这个参数)"
-          fi
-
-          if [ ! -f "$OBJ/XiangKeIntent.o" ]; then
-            echo "⚠️ 以上写法都没成功，退回普通编译"
-            xcrun --sdk iphoneos swiftc \
-              -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library \
-              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o"
-          fi
-
-          echo "--- 全仓库搜索 *.swiftconstvalues ---"
-          find . -name '*.swiftconstvalues' 2>/dev/null | head || true
-
-          if [ -f "$CV" ]; then
-            echo "--- sidecar 内容（前 40 行）---"
-            head -40 "$CV" || true
-          else
-            echo "⚠️ 最终仍无 sidecar —— 元数据提取大概率会失败"
-          fi
-
-          echo "--- objects ---"
-          ls -la "$OBJ"
-
-          # ---------- 3) 链接 ----------
-          # 用 swiftc 当链接器驱动，它才会自动带上 Swift 运行时
-          OBJS=$(find "$OBJ" -name '*.o' -print | sort | tr '\n' ' ')
-          xcrun --sdk iphoneos swiftc \
-            -target arm64-apple-ios16.0 -sdk "$SDK" -module-name XiangKe \
-            -L "$SDK/usr/lib/swift" \
-            -Xlinker -rpath -Xlinker /usr/lib/swift \
-            -o "$APP/XiangKe" $OBJS \
+          mkdir -p "$APP"
+          SOURCES=$(find Sources -name '*.m' -print | sort | tr '\n' ' ')
+          echo "源文件: $SOURCES"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=16.0 \
+            -fobjc-arc \
+            -O1 \
+            -ISources \
             -framework UIKit \
             -framework Foundation \
             -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
             -framework BackgroundTasks \
             -framework Security \
-            -framework AppIntents
-          file "$APP/XiangKe"
-          echo "--- Swift 运行时链接情况（应能看到 /usr/lib/swift/...）---"
-          otool -L "$APP/XiangKe" | head -20 || true
-
+            -o "$APP/XiangKe" \
+            $SOURCES
           cp Sources/Info.plist "$APP/Info.plist"
           cp Resources/AppIcon*.png "$APP/"
           printf 'APPL????' > "$APP/PkgInfo"
           echo "--- app bundle ---"
           ls -la "$APP"
-
-      - name: Extract App Intents metadata
-        run: |
-          set -euo pipefail
-          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          APP="$PWD/out/Payload/XiangKe.app"
-
-          TOOLCHAIN="$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain"
-          PROC="$TOOLCHAIN/usr/bin/appintentsmetadataprocessor"
-          if [ ! -x "$PROC" ]; then
-            PROC=$(find /Applications -name appintentsmetadataprocessor -type f 2>/dev/null | head -1)
-          fi
-          echo "processor = ${PROC:-<未找到>}"
-          [ -x "$PROC" ] || { echo "❌ 找不到 appintentsmetadataprocessor"; exit 1; }
-
-          # Xcode 15.4 的该工具要求 --xcode-version，且不支持 --bundle-identifier
-          XCODE_VER=$(xcodebuild -version | awk '/Build version/{print $3}')
-          echo "xcode-version = $XCODE_VER"
-
-          # 源文件列表（绝对路径）
-          ( cd Sources && ls *.swift ) | sed "s|^|$PWD/Sources/|" > build/SwiftFileList
-          echo "--- Swift 源文件 ---"; cat build/SwiftFileList
-
-          echo "--- 查找常量值 sidecar ---"
-          find build -name '*.swiftconstvalues' -print || true
-
-          CV="$PWD/build/obj/XiangKeIntent.swiftconstvalues"
-          HAS_CV=0
-          if [ -f "$CV" ]; then
-            echo "$CV" > build/SwiftConstValuesFileList
-            HAS_CV=1
-            echo "✓ 有常量值 sidecar，可用编译期提取"
-          else
-            echo "· 无常量值 sidecar —— 走二进制提取（Xcode 15 的默认路径）"
-          fi
-
-          base_args() {
-            "$PROC" \
-              --toolchain-dir "$TOOLCHAIN" \
-              --module-name XiangKe \
-              --sdk-root "$SDK" \
-              --xcode-version "$XCODE_VER" \
-              --platform-family iOS \
-              --deployment-target 16.0 \
-              --output "$APP" \
-              --target-triple arm64-apple-ios16.0 \
-              --binary-file "$APP/XiangKe" \
-              --source-file-list "$PWD/build/SwiftFileList" \
-              --ignore-query-generics-errors \
-              --force \
-              "$@"
-          }
-
-          # 注意：该处理器在「什么都没提取到」时**也返回 0**，
-          # 所以成功判据只能是「输出目录是否真的出现」，不能看退出码。
-          attempt() {
-            label="$1"; shift
-            echo "===== 尝试：$label ====="
-            rm -rf "$APP/Metadata.appintents"
-            base_args "$@" || true
-            if [ -d "$APP/Metadata.appintents" ]; then
-              echo "✓ 成功 [${label}]"
-              return 0
-            fi
-            echo "· 未产出 [${label}]"
-            return 1
-          }
-
-          ok=0
-          if [ "$HAS_CV" -eq 1 ]; then
-            if attempt "编译期提取" \
-                 --swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
-                 --compile-time-extraction; then ok=1; fi
-          fi
-
-          if [ "$ok" -ne 1 ]; then
-            if attempt "默认提取"; then ok=1; fi
-          fi
-
-          if [ "$ok" -ne 1 ]; then
-            if attempt "legacy 提取（扫二进制）" --legacy-extraction; then ok=1; fi
-          fi
-
-          if [ "$ok" -ne 1 ]; then
-            echo "⚠️ 元数据未生成 —— App Intent 动作不会出现在快捷指令里。"
-            echo "   构建继续：其余功能（URL Scheme / 后台刷新 / 锁屏探针）不受影响。"
-            exit 0
-          fi
-
-          echo "--- Metadata.appintents ---"
-          ls -la "$APP/Metadata.appintents" || { echo "❌ 没有产出 Metadata.appintents"; exit 1; }
-
-          echo "--- actionsdata 内容检查 ---"
-          if strings "$APP/Metadata.appintents/extract.actionsdata" 2>/dev/null \
-               | grep -qi "XiangKeProbe"; then
-            echo "✓ 元数据里找到 XiangKeProbeIntent"
-          else
-            echo "⚠️ 元数据里没找到 XiangKeProbeIntent"
-          fi
+          file "$APP/XiangKe"
 
       - name: Inject entitlements and package IPA
         run: |
@@ -258,11 +59,6 @@ jobs:
           ldid -Sentitlements.plist "$APP/XiangKe"
           echo "----- applied entitlements -----"
           ldid -e "$APP/XiangKe"
-          if [ -d "$APP/Metadata.appintents" ]; then
-            echo "✓ 包内含 App Intents 元数据"
-          else
-            echo "⚠️ 包内不含 App Intents 元数据（快捷指令里不会出现动作）"
-          fi
           rm -f out/XiangKe.ipa
           cd out
           zip -qry XiangKe.ipa Payload
