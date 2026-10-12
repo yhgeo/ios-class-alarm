@@ -141,7 +141,8 @@ static const CGFloat kCorner       = 12.0;
     NSString *summary = [CALApplier statusSummaryWithTimetable:tt];
 
     NSMutableString *s = [NSMutableString stringWithString:summary];
-    if (tt.courses.count == 0) {
+    // 注意：课表可以只写在 overrides 里（按日期逐天写），这时 courses 为空但课表并不空
+    if (tt.courses.count == 0 && tt.overrides.count == 0) {
         [s appendString:@"\n⚠️ 课表为空，可点「载入示例课表」体验"];
     }
     [s appendFormat:@"\n提前量：%ld 分钟", (long)tt.advanceMinutes];

@@ -169,6 +169,11 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
          titleForFooterInSection:(NSInteger)section {
     if (section != kSettingSection) return nil;
     if (self.timetable.courses.count == 0) {
+        // 课表可能只写在 overrides 里（导入的按日期课表），此时本页看不到，需要说明
+        if (self.timetable.overrides.count > 0) {
+            return @"常规周课表为空 —— 当前课表是通过「导入课表」按日期设置的，"
+                    "本页只能编辑常规周课表。";
+        }
         return @"还没有课程。点右上角「+」添加，或回上一页载入示例课表。";
     }
     return @"闹钟时间 = 当天第一节课开始时间 − 提前量";
