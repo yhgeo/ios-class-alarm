@@ -22,17 +22,20 @@ jobs:
           echo "iOS SDK: $SDK"
           APP="out/Payload/AlarmPoC.app"
           mkdir -p "$APP"
+          SOURCES=$(find Sources -name '*.m' -print | sort | tr '\n' ' ')
+          echo "源文件: $SOURCES"
           xcrun --sdk iphoneos clang \
             -arch arm64 \
             -isysroot "$SDK" \
             -miphoneos-version-min=16.0 \
             -fobjc-arc \
             -O1 \
+            -ISources \
             -framework UIKit \
             -framework Foundation \
             -framework Security \
             -o "$APP/AlarmPoC" \
-            Sources/main.m
+            $SOURCES
           cp Sources/Info.plist "$APP/Info.plist"
           printf 'APPL????' > "$APP/PkgInfo"
           echo "--- app bundle ---"
