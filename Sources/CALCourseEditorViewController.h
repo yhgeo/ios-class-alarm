@@ -30,6 +30,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// 新增时的默认星期（1=周一 … 7=周日）
 @property (nonatomic) NSInteger defaultWeekday;
 
+/// 隐藏「星期」字段 —— 自定义课表是按日期的，星期没有意义
+@property (nonatomic) BOOL hidesWeekdayField;
+
 @end
 
 NS_ASSUME_NONNULL_END

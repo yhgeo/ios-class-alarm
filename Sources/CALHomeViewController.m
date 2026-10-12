@@ -10,6 +10,7 @@
 #import "CALTimetable.h"
 #import "CALTimetableViewController.h"
 #import "CALImportViewController.h"
+#import "CALSettingsViewController.h"
 #import "CALPaddedLabel.h"
 
 #pragma mark - 布局常量
@@ -37,7 +38,7 @@ static const CGFloat kCorner       = 12.0;
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     [self buildUI];
     [self refreshStatus];
-    [self showDiagnostics];
+    self.logView.text = @"准备就绪。点「立即应用」按课表设置次日闹钟。";
 
     // 快捷指令通过 xiangke://apply 唤起后，结果从这里回来
     [[NSNotificationCenter defaultCenter] addObserver:self
@@ -75,12 +76,10 @@ static const CGFloat kCorner       = 12.0;
     NSArray<NSString *> *titles = @[@"立即应用（设置次日闹钟）",
                                     @"编辑课表",
                                     @"导入课表（URL）",
-                                    @"载入示例课表",
-                                    @"存储自检",
-                                    @"清理课表闹钟"];
+                                    @"清理课表闹钟",
+                                    @"设置"];
     NSArray<NSString *> *selectors = @[@"onApply", @"onEditTimetable",
-                                       @"onImport", @"onSample",
-                                       @"onDiagnostics", @"onClear"];
+                                       @"onImport", @"onClear", @"onSettings"];
 
     NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
     for (NSUInteger i = 0; i < titles.count; i++) {
@@ -143,15 +142,11 @@ static const CGFloat kCorner       = 12.0;
     NSMutableString *s = [NSMutableString stringWithString:summary];
     // 注意：课表可以只写在 overrides 里（按日期逐天写），这时 courses 为空但课表并不空
     if (tt.courses.count == 0 && tt.overrides.count == 0) {
-        [s appendString:@"\n⚠️ 课表为空，可点「载入示例课表」体验"];
+        [s appendString:@"\n⚠️ 课表为空 —— 可到「设置」载入示例，或点「导入课表」"];
     }
     [s appendFormat:@"\n提前量：%ld 分钟", (long)tt.advanceMinutes];
     self.statusLabel.text = s;
     [self.view setNeedsLayout];
-}
-
-- (void)showDiagnostics {
-    self.logView.text = [CALTimetableStore shared].storageDiagnostics;
 }
 
 #pragma mark - 动作
@@ -173,8 +168,9 @@ static const CGFloat kCorner       = 12.0;
     [self.navigationController pushViewController:vc animated:YES];
 }
 
-- (void)onDiagnostics {
-    self.logView.text = [CALTimetableStore shared].storageDiagnostics;
+- (void)onSettings {
+    CALSettingsViewController *vc = [[CALSettingsViewController alloc] init];
+    [self.navigationController pushViewController:vc animated:YES];
 }
 
 #pragma mark - 导入课表
@@ -314,42 +310,6 @@ static const CGFloat kCorner       = 12.0;
             [self refreshStatus];
         });
     });
-}
-
-- (void)onSample {
-    UIAlertController *ac =
-        [UIAlertController alertControllerWithTitle:@"载入示例课表"
-                                            message:@"会覆盖当前课表，确定继续？"
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    [ac addAction:[UIAlertAction actionWithTitle:@"取消"
-                                           style:UIAlertActionStyleCancel
-                                         handler:nil]];
-    __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"载入"
-                                           style:UIAlertActionStyleDestructive
-                                         handler:^(UIAlertAction *action) {
-        [weakSelf loadSampleTimetable];
-    }]];
-    [self presentViewController:ac animated:YES completion:nil];
-}
-
-- (void)loadSampleTimetable {
-    CALTimetableStore *store = [CALTimetableStore shared];
-    store.timetable.advanceMinutes = 30;
-    store.timetable.courses = @[
-        [CALCourse courseWithWeekday:1 start:@"08:00" end:@"09:40" name:@"高等数学"],
-        [CALCourse courseWithWeekday:1 start:@"10:00" end:@"11:40" name:@"大学英语"],
-        [CALCourse courseWithWeekday:2 start:@"09:00" end:@"10:40" name:@"线性代数"],
-        [CALCourse courseWithWeekday:3 start:@"08:00" end:@"09:40" name:@"数据结构"],
-        [CALCourse courseWithWeekday:4 start:@"10:00" end:@"11:40" name:@"操作系统"],
-        [CALCourse courseWithWeekday:5 start:@"08:30" end:@"10:10" name:@"计算机网络"],
-    ];
-
-    BOOL ok = [store save];
-    NSString *head = ok ? @"已载入示例课表（6 节课）并写入磁盘。"
-                        : @"⚠️ 示例课表已载入，但保存到磁盘失败！";
-    self.logView.text = [NSString stringWithFormat:@"%@\n\n%@", head, [store storageDiagnostics]];
-    [self refreshStatus];
 }
 
 @end

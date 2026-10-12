@@ -86,7 +86,9 @@ static NSDate *CALDateFromTimeString(NSString *string) {
     self.nameField.returnKeyType = UIReturnKeyDone;
     self.nameField.delegate = self;
 
-    [self addRowWithTitle:@"星期" control:self.weekdayControl];
+    if (!self.hidesWeekdayField) {
+        [self addRowWithTitle:@"星期" control:self.weekdayControl];
+    }
     [self addRowWithTitle:@"开始时间" control:self.startPicker];
     [self addRowWithTitle:@"结束时间" control:self.endPicker];
     [self addRowWithTitle:@"课程名" control:self.nameField];
