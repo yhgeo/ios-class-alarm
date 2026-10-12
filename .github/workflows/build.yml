@@ -45,90 +45,65 @@ jobs:
           # ---------- 2) Swift → .o ----------
           # App Intents 的元数据**必须**由编译器产出的常量值 sidecar 驱动
           # （处理器会明确报错：No swift const values found ... cannot be extracted）。
-          # 该 flag 在不同 Xcode 版本上写法不一，且可能被接受却什么都不写 ——
-          # 所以判断依据是「文件是否真的出现」，并且依次试几种写法。
-          echo "===== swift-frontend 中 const-value 相关选项 ====="
-          xcrun --sdk iphoneos swift-frontend -help-hidden 2>&1 | grep -i "const-value" || echo "(无匹配)"
-          echo "================================================="
+          #
+          # 关键：-emit-const-values 是**驱动层**开关，不是前端开关 ——
+          # 所以 swift-frontend -help 里根本看不到它；驱动收到它之后会自己
+          # 往前端补 -emit-const-values-path（见 swift-driver 的
+          # FrontendJobHelpers.swift）。此前只传前端路径的写法能过参数检查，
+          # 却什么都不写，正是踩了这个坑。
+          echo "===== swiftc（驱动）中 const-value 相关选项 ====="
+          xcrun --sdk iphoneos swiftc -help 2>&1 | grep -i "const-value" || echo "(无匹配)"
+          echo "=============================================="
 
           CV="$OBJ/XiangKeIntent.swiftconstvalues"
-          PROTOS="AppIntent AppEntity EntityQuery AppEnum AppShortcutsProvider AppShortcutProviding AppIntentsPackage DynamicOptionsProvider AnyResolverProviding TransientEntity"
 
           gen_sidecar() {
             label="$1"; shift
-            rm -f "$OBJ/XiangKeIntent.o" "$CV"
+            rm -f "$OBJ/XiangKeIntent.o"
+            find build -name '*.swiftconstvalues' -delete 2>/dev/null || true
+
             xcrun --sdk iphoneos swiftc \
               -target arm64-apple-ios16.0 -sdk "$SDK" \
               -module-name XiangKe -parse-as-library \
               "$@" -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
               >/dev/null 2>&1 || true
 
-            for cand in "$CV" "$OBJ/XiangKeIntent.o.swiftconstvalues" \
-                        "$OBJ/XiangKeIntent.swiftconstvalues"; do
-              if [ -f "$cand" ]; then
-                if [ "$cand" != "$CV" ]; then cp -f "$cand" "$CV"; fi
-                echo "✓ 常量值 sidecar 产出成功 ← 参数 [$label]"
-                return 0
-              fi
-            done
-            echo "· 参数 [$label] 未产出 sidecar"
+            # -print -quit：找到第一个就停，避免 head 触发 SIGPIPE
+            found=$(find build -name '*.swiftconstvalues' -print -quit 2>/dev/null)
+            if [ -n "$found" ]; then
+              cp -f "$found" "$CV"
+              echo "✓ 常量值 sidecar 产出成功 ← [${label}]（来源 $found）"
+              return 0
+            fi
+            echo "· 未产出 ← [${label}]"
             return 1
           }
 
-          gen_sidecar "A driver -Xfrontend" \
+          # A：驱动层开关 —— 预期正解
+          gen_sidecar "A -emit-const-values" -emit-const-values || true
+
+          # A2：驱动开关 + 显式路径
+          if [ ! -f "$CV" ]; then
+            gen_sidecar "A2 驱动开关+显式路径" \
+              -emit-const-values \
               -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
-
-          # A2：加上 -emit-module（Xcode 的调用里始终带它，可能正是发射的前置条件）
-          if [ ! -f "$CV" ]; then
-            echo "--- 尝试 A2：driver + -emit-module ---"
-            rm -f "$OBJ/XiangKeIntent.o" "$CV"
-            xcrun --sdk iphoneos swiftc \
-              -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library -swift-version 5 \
-              -emit-module -emit-module-path "$OBJ/XiangKe.swiftmodule" \
-              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
-              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" 2>&1 | head -10 || true
-            if [ -f "$CV" ]; then echo "✓ A2 成功"; else echo "· A2 未产出"; fi
           fi
 
-          # 诊断：看驱动究竟怎么调前端（模式、是否带 -primary-file）
+          # B：历史写法（只给前端路径）
           if [ ! -f "$CV" ]; then
-            echo "--- swiftc -### （前端真实命令行）---"
+            gen_sidecar "B 仅前端路径" \
+              -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
+          fi
+
+          # 诊断：确认驱动是否真的往前端补了 -emit-const-values-path
+          if [ ! -f "$CV" ]; then
+            echo "--- swiftc -### 里的 const-values 参数 ---"
             xcrun --sdk iphoneos swiftc \
               -target arm64-apple-ios16.0 -sdk "$SDK" \
               -module-name XiangKe -parse-as-library \
-              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+              -emit-const-values \
               -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" -### 2>&1 \
-              | head -12 || true
-          fi
-
-          # B：直接调用 swift-frontend，带 -primary-file（Xcode 就是这么调的）
-          if [ ! -f "$CV" ]; then
-            echo "--- 尝试 B：直接调用 swift-frontend ---"
-            rm -f "$OBJ/XiangKeIntent.o"
-            xcrun --sdk iphoneos swift-frontend -frontend -c \
-              -primary-file Sources/XiangKeIntent.swift \
-              -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library -swift-version 5 \
-              -enable-objc-interop \
-              -emit-const-values-path "$CV" \
-              -o "$OBJ/XiangKeIntent.o" 2>&1 | head -15 || true
-            if [ -f "$CV" ]; then echo "✓ B 成功"; else echo "· B 未产出"; fi
-          fi
-
-          # C：走输出文件映射（Xcode 的实际做法之一）
-          if [ ! -f "$CV" ]; then
-            echo "--- 尝试 C：output-file-map ---"
-            printf '{\n  "Sources/XiangKeIntent.swift": {\n    "object": "%s",\n    "swiftconstvalues": "%s"\n  }\n}\n' \
-              "$PWD/$OBJ/XiangKeIntent.o" "$PWD/$CV" > build/ofm.json
-            cat build/ofm.json
-            rm -f "$OBJ/XiangKeIntent.o"
-            xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library \
-              -output-file-map build/ofm.json \
-              -emit-const-values-path "$CV" \
-              -c Sources/XiangKeIntent.swift 2>&1 | head -10 || true
-            if [ -f "$CV" ]; then echo "✓ C 成功"; else echo "· C 未产出"; fi
+              | tr ' ' '\n' | grep -i "const-values" || echo "(驱动没补这个参数)"
           fi
 
           if [ ! -f "$OBJ/XiangKeIntent.o" ]; then
