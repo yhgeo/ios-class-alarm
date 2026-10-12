@@ -154,9 +154,10 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     self.footnoteLabel.font = [UIFont systemFontOfSize:12];
     self.footnoteLabel.textColor = [UIColor tertiaryLabelColor];
     self.footnoteLabel.text =
-        @"粘贴按钮是灰的 = 剪贴板里没有文字（先去别处复制地址）。\n"
-        @"粘贴和长按都不行的话，用「从「文件」选 JSON」——那条路不碰剪贴板。\n"
-        @"支持 GitHub Gist：填 gist 页面地址会自动补 /raw；只接受 https。";
+        @"粘贴按钮点了没反应属正常 —— 巨魔环境下系统禁止 App 直接读剪贴板，\n"
+        @"请改用「从「文件」选 JSON」（不经过剪贴板，一定可用）。\n"
+        @"也可以长按上面的输入框手动粘贴。\n"
+        @"支持 Gist：填 gist 页面地址会自动补 /raw；只接受 https。";
     [self.view addSubview:self.footnoteLabel];
 }
 
@@ -213,10 +214,15 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 }
 
 - (void)onPickFile {
+    // 两个关键点：
+    // 1) asCopy:NO（就地打开）—— asCopy:YES 要系统把文件拷进 App 容器，
+    //    本 App 带 no-sandbox、没有常规容器路径，会导致选择器里文件全都不可选。
+    // 2) 类型放宽到 UTTypeData —— 只写 UTTypeJSON 时，凡是系统没识别成 public.json
+    //    的文件（比如从聊天软件存下来的）都会是灰的、点不动。
     UIDocumentPickerViewController *picker =
         [[UIDocumentPickerViewController alloc]
-            initForOpeningContentTypes:@[UTTypeJSON, UTTypePlainText]
-                                asCopy:YES];
+            initForOpeningContentTypes:@[UTTypeJSON, UTTypeText, UTTypeData]
+                                asCopy:NO];
     picker.delegate = self;
     picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
@@ -243,20 +249,23 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 
 /// UIPasteControl 被点击后，系统把剪贴板内容以 NSItemProvider 交到这里。
 /// 此时用户已经表达过粘贴意图，系统不会再弹权限框。
+///
+/// 但实测（TrollStore / no-sandbox / iOS 16.6.1）三条常规路径都可能被挡：
+///   · 直接读 UIPasteboard → hasStrings 为真但 string 返回空（被静默拒绝）
+///   · loadObjectOfClass:  → Cannot load representation of type public.utf8-plain-text
+/// 所以这里多铺一条「直接取原始 data」的路：绕开类型转换（coercion）这一步，
+/// 拿 NSData 自己解成字符串。
 - (void)pasteItemProviders:(NSArray<NSItemProvider *> *)itemProviders {
     NSMutableString *trace = [NSMutableString string];
 
-    // 路径 1：直接读剪贴板。
-    // 这是首选 —— 用户已通过 UIPasteControl 授权，直接读不会弹框；
-    // 同时绕开 NSItemProvider 在本环境下的加载失败
-    // （实测报错：Cannot load representation of type public.utf8-plain-text）。
+    // 路径 1：直接读剪贴板
     UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
     NSString *text = nil;
 
     if (pasteboard.hasStrings) {
         text = pasteboard.string;
         if (text.length == 0) text = pasteboard.strings.firstObject;
-        [trace appendFormat:@"· 直接读取剪贴板：%@\n", text.length > 0 ? @"成功" : @"拿到空值"];
+        [trace appendFormat:@"· 直接读取剪贴板：%@\n", text.length > 0 ? @"成功" : @"拿到空值（被拒）"];
     } else {
         [trace appendString:@"· 直接读取剪贴板：系统报告没有文本\n"];
     }
@@ -266,12 +275,20 @@ static NSString *CALNormalizeImportURL(NSString *input) {
         return;
     }
 
-    // 路径 2：退回到系统交过来的 NSItemProvider
+    // 挑一个能提供文本的 provider
     NSItemProvider *provider = nil;
     for (NSItemProvider *p in itemProviders) {
-        if ([p canLoadObjectOfClass:[NSString class]]) {
+        if ([p hasItemConformingToTypeIdentifier:@"public.utf8-plain-text"]) {
             provider = p;
             break;
+        }
+    }
+    if (!provider) {
+        for (NSItemProvider *p in itemProviders) {
+            if ([p canLoadObjectOfClass:[NSString class]]) {
+                provider = p;
+                break;
+            }
         }
     }
 
@@ -283,19 +300,38 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     }
 
     __weak typeof(self) weakSelf = self;
-    [provider loadObjectOfClass:[NSString class]
-              completionHandler:^(id<NSItemProviderReading> object, NSError *error) {
-        NSString *loaded = [object isKindOfClass:[NSString class]] ? (NSString *)object : nil;
 
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (loaded.length > 0) {
-                [weakSelf fillWithText:loaded];
-                return;
+    // 路径 2：直接取原始 data（不要求转换成 NSString，避开 coercion）
+    [provider loadDataRepresentationForTypeIdentifier:@"public.utf8-plain-text"
+                                    completionHandler:^(NSData *data, NSError *dataError) {
+        NSString *fromData = nil;
+        if (data.length > 0) {
+            fromData = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            if (fromData.length == 0) {
+                fromData = [[NSString alloc] initWithData:data encoding:NSUnicodeStringEncoding];
             }
-            [trace appendFormat:@"· 系统提供的数据：%@\n",
-                                 error.localizedDescription ?: @"返回空"];
-            [weakSelf alertWithTitle:@"拿不到文本" message:trace];
-        });
+        }
+
+        if (fromData.length > 0) {
+            dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf fillWithText:fromData]; });
+            return;
+        }
+
+        // 路径 3：退回类型转换
+        [provider loadObjectOfClass:[NSString class]
+                  completionHandler:^(id<NSItemProviderReading> object, NSError *objectError) {
+            NSString *fromObject = [object isKindOfClass:[NSString class]] ? (NSString *)object : nil;
+
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (fromObject.length > 0) {
+                    [weakSelf fillWithText:fromObject];
+                    return;
+                }
+                [trace appendFormat:@"· 取原始数据：%@\n", dataError.localizedDescription ?: @"空"];
+                [trace appendFormat:@"· 类型转换：%@\n", objectError.localizedDescription ?: @"空"];
+                [weakSelf alertWithTitle:@"拿不到文本" message:trace];
+            });
+        }];
     }];
 }
 
