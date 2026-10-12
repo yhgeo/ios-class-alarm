@@ -1,46 +1,55 @@
-# 响课（XiangKe）
+# 响课
 
-用课表自动设置次日早晨的闹钟。目标设备：iPhone 13 / iOS 16.6.1 / TrollStore。
+按课表自动设置次日早晨的闹钟 —— 改一次课表，闹钟跟着变，不用每天手动设。
 
-## 它解决什么问题
+> **系统要求**：iPhone（arm64）/ iOS 16 及以上 / 已安装 [TrollStore](https://github.com/opa334/TrollStore)
 
-iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快捷指令方案会让闹钟无限累积。
-本项目通过 TrollStore 的权限优势，**直接读写系统「时钟」App 的闹钟**，从而能增、能删、能改。
+## 为什么需要它
 
-## 当前进度
+iOS 16 的快捷指令能「添加闹钟」却**不能删除闹钟**，纯快捷指令方案会让闹钟越积越多。
 
-| 能力 | 状态 |
-|---|---|
-| 读写系统闹钟（私有 API 路线） | ✅ 已验证可行 |
-| 模块化 App 骨架 | ✅ 已完成 |
-| 载入示例课表 + 一键应用 | ✅ 已完成 |
-| 课表编辑界面（增 / 删 / 改 / 提前量） | ✅ 已完成 |
-| 课表持久化（重启不丢） | ✅ 已完成 |
-| 远程 JSON 导入（URL） | ✅ 已完成 |
-| 快捷指令唤起（URL Scheme） | ✅ 已完成 |
-| 应用名 / 图标 | ✅ 已完成 |
+响课借助 TrollStore 的权限，**直接读写系统「时钟」App 的闹钟**，所以能增、能删、能改，
+而且设出来的是**真·系统闹钟**（正常响铃、支持贪睡），不是容易被忽略的普通通知。
 
-## 模块结构
+## 安装
 
-低耦合设计，各模块只负责一件事，改一处不会牵连别处。
+1. 打开本仓库的 **Actions** 页面，点最近一次成功的 `Build XiangKe IPA`
+2. 在页面底部 **Artifacts** 区域下载 `XiangKe-ipa`（下载下来是 zip，解压得到 `XiangKe.ipa`）
+3. 用 TrollStore 打开 `XiangKe.ipa` 安装
+4. 桌面出现「响课」图标
 
-| 文件 | 职责 |
-|---|---|
-| `CALPrivateAPI.h` | 私有 API 与路径常量集中声明 |
-| `CALTimetable.h/.m` | 课表模型 + 持久化（含存储目录探测） |
-| `CALAlarmStore.h/.m` | 系统闹钟读写引擎（不关心课表） |
-| `CALDaemonReloader.h/.m` | 让 mobiletimerd 重新加载数据（换方案只改这里） |
-| `CALScheduleEngine.h/.m` | 纯计算：课表 → 目标时间（无副作用） |
-| `CALApplier.h/.m` | 协调层，唯一知道完整流程的模块 |
-| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 导入 / 示例 / 自检 / 清理 |
-| `CALTimetableViewController.h/.m` | 课表列表：按星期分组，增删改 + 提前量 |
-| `CALCourseEditorViewController.h/.m` | 单节课编辑表单（只收集输入并回调） |
-| `CALPaddedLabel.h/.m` | 带内边距的 UILabel（通用小组件） |
-| `main.m` | 入口与装配（导航栈 + URL Scheme 处理） |
+> 下载 Artifacts 需要登录 GitHub 账号。
 
-## 课表数据格式
+## 快速上手
 
-存于 App 沙箱的 `class-alarm-timetable.json`：
+### 1. 录入课表
+
+打开响课 → 点「编辑课表」：
+
+- 右上角 `+` 添加一节课：选星期、起止时间、填课程名
+- 点某一行可修改，**左滑删除**
+- 顶部「提前提醒」设置提前量（默认 30 分钟）
+- 只想先看看效果，可以点「载入示例课表」
+
+### 2. 应用闹钟
+
+回主页点「立即应用（设置次日闹钟）」。
+
+它会算出**次日第一节课**的开始时间，减去提前量，写进系统闹钟。
+
+举例：提前量 30 分钟，明天第一节课 8:00 → 闹钟设为 **7:30**。
+
+### 3. 核对
+
+打开系统「时钟」App，能看到一个标题形如 `课表|周二 高等数学` 的闹钟。
+
+这个 `课表|` 前缀是响课的标记 —— 清理时**只删自己创建的**，不会动你手动设的闹钟。
+
+## 课表 JSON 格式
+
+如果课表经常变、想用电脑批量编辑，可以把课表写成 JSON 放到网上，让响课拉取。
+
+### 完整示例
 
 ```json
 {
@@ -48,100 +57,91 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
   "advanceMinutes": 30,
   "courses": [
     { "weekday": 1, "start": "08:00", "end": "09:40", "name": "高等数学" },
-    { "weekday": 2, "start": "09:00", "end": "10:40", "name": "线性代数" }
-  ],
-  "overrides": {
-    "2026-10-13": [ { "start": "14:00", "end": "15:40", "name": "临时补课" } ],
-    "2026-10-14": []
-  }
+    { "weekday": 1, "start": "10:00", "end": "11:40", "name": "大学英语" },
+    { "weekday": 2, "start": "09:00", "end": "10:40", "name": "线性代数" },
+    { "weekday": 3, "start": "08:00", "end": "09:40", "name": "数据结构" },
+    { "weekday": 5, "start": "08:30", "end": "10:10", "name": "计算机网络" }
+  ]
 }
 ```
 
-- `weekday`：1=周一 … 7=周日
-- `advanceMinutes`：闹钟 = 第一节课开始时间 − 该值
-- `overrides`：指定日期覆盖常规课表（**空数组 = 当天无课**）。
-  模型层保留该字段以便兼容旧数据，**当前版本没有编辑入口**，留空即可。
+### 字段说明
 
-## 工作原理
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `version` | 数字 | 格式版本，固定填 `1` |
+| `advanceMinutes` | 数字 | 提前量（分钟）。**闹钟 = 第一节课开始时间 − 该值** |
+| `courses` | 数组 | 常规周课表，每个元素是一节课 |
+| `courses[].weekday` | 数字 | 星期几：`1`=周一，`2`=周二 … `7`=周日 |
+| `courses[].start` | 字符串 | 开始时间，`"HH:mm"`，24 小时制 |
+| `courses[].end` | 字符串 | 结束时间，`"HH:mm"`。**只影响界面显示，不影响闹钟** |
+| `courses[].name` | 字符串 | 课程名，会出现在闹钟标题里 |
 
-```
-课表 → 算次日第一节课时间 → 写 com.apple.mobiletimerd.plist → 重启 mobiletimerd → 系统生效
-```
+> **响课只关心每天最早的那节课** —— 闹钟时间由它决定，同一天的其他课只用于展示。
 
-闹钟标题统一加前缀 `课表|`，因此清理时**只删自己创建的**，不会误伤你手动设的闹钟。
+### 可选字段
 
-## 构建
-
-本机是 Windows，没有 Xcode，编译走 GitHub Actions 的 macOS runner。
-直接用 clang 编译再手工组装 `.app`，不依赖 xcodegen / xcodebuild：
-
-```
-SOURCES=$(find Sources -name '*.m')
-xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK \
-    -miphoneos-version-min=16.0 -fobjc-arc -ISources \
-    -framework UIKit -framework Foundation -framework CoreGraphics -framework Security \
-    -o XiangKe.app/XiangKe $SOURCES
-
-cp Sources/Info.plist XiangKe.app/Info.plist
-cp Resources/AppIcon*.png XiangKe.app/
-ldid -Sentitlements.plist XiangKe.app/XiangKe
-zip -r XiangKe.ipa Payload
+```json
+"overrides": {
+  "2026-10-13": [ { "start": "14:00", "end": "15:40", "name": "临时补课" } ],
+  "2026-10-14": []
+}
 ```
 
-## 踩坑记录
+`overrides` 用来按具体日期覆盖常规课表，**空数组表示当天没课**。
+当前版本没有对应的编辑界面，可以整个省略不写。
 
-这些是实测踩过的，记下来免得重复：
+### 怎么放到网上
 
-- **xcodegen 生成的工程是 Xcode 16 格式**（objectVersion 77），runner 上的 Xcode 15.4 读不了 → 改用 clang 直接编译
-- **`SecTaskRef` / `SecTaskCreateFromSelf`** 是私有 API，公开头文件未导出，需手动 `typedef` + `extern`
-- **`xpc_connection_create_mach_service`** 在 iOS 公开头文件里标记为 unavailable，须用 `dlsym` 取函数指针
-- **`errno` 是宏**（展开为 `(*__error())`），直接当 `appendFormat:` 的可变参数会报 `expected ']'`，必须先存进 int 变量
-- **`no-sandbox` 下 `NSHomeDirectory()` 返回 `/var/mobile`**，不是 App 沙箱，别用它拼数据路径
-- **系统闹钟 XPC 服务名是 `com.apple.MobileTimer.alarmserver`**，不是 `mobiletimerd`
-- **改了 plist 后 mobiletimerd 不会自动重读**，必须重启它（用 SIGKILL，避免它退出时把内存状态写回覆盖数据）
-- **`CGRectGetMaxY` 这类 CG 函数是 extern 符号**（`CGRectMake` 是 `static inline`，不需要链接），
-  手写 clang 命令行必须显式加 `-framework CoreGraphics`，否则链接期报 `Undefined symbols: _CGRectGetMaxY`
-- **`no-sandbox` 下 `NSDocumentDirectory` 指向 `/var/mobile/Documents`，不保证可写**；
-  写文件后一定要**回读校验**，`writeToFile:` 返回 YES 也不代表真的落盘了
+推荐用 GitHub Gist（免费、随时改、有版本记录）：
 
-## 使用
+1. 打开 https://gist.github.com
+2. 「Filename」填 `timetable.json`，内容粘贴上面的 JSON
+3. 点 **Create public gist**
+4. 创建后点右上角 **Raw**，浏览器地址栏里那个地址就是要用的 URL
+   （形如 `https://gist.githubusercontent.com/你的用户名/xxxx/raw/xxxx/timetable.json`）
 
-1. 打开 Actions 页面，等 `Build XiangKe IPA` 跑完，下载产物 `XiangKe-ipa`
-2. 用 TrollStore 安装，桌面显示为「响课」
-3. 打开 App → 点「编辑课表」录入课程（右上角 `+` 新增，左滑删除，点行编辑；
-   顶部「提前提醒」可改提前量），也可先点「载入示例课表」体验
-4. 课表想批量更新：主页「导入课表（URL）」填入课表 JSON 的 https 地址（如 GitHub Gist 的 raw 链接）
-5. 回主页点「立即应用（设置次日闹钟）」
-6. 打开系统「时钟」App 核对
+然后：响课主页 →「导入课表（URL）」→ 粘贴地址 → 导入。
 
-## 配合快捷指令做无人值守
+> ⚠️ 必须是 **https** 开头的地址。iOS 默认禁止明文 http 请求，填 http 会被拒绝。
 
-App 注册了 URL Scheme `xiangke://apply`，被打开时会**自动执行一次「应用课表」**。
+导入会**整体替换**当前课表并立即保存。导入完回主页点「立即应用」即可生效。
+下次再点「导入课表」会记住上次填的地址，改完 Gist 直接再导一次就行。
 
-在「快捷指令」App 里：
+## 自动运行（不用每天手动点）
 
-1. 新建一个快捷指令，只放一个动作：**打开 URL** → 填 `xiangke://apply`
-2. 切到「自动化」→ 新建个人自动化 → **特定时间**（例如每天 22:00）→ 选「每天」
-3. 动作选刚才那个快捷指令；**关掉「运行前询问」**（iOS 16 上还会额外要求关掉「运行时通知」才能静默）
+响课注册了 `xiangke://apply`，被打开时会自动执行一次「应用课表」。
+配合「快捷指令」的定时自动化，就能每天自动设好闹钟：
 
-这样每天到点自动唤起响课、算好次日第一节课、写好系统闹钟，全程不用手动点。
+1. 打开「快捷指令」App → 新建快捷指令 → 添加动作 **打开 URL** → 填 `xiangke://apply`
+   （建议命名为「响课自动设闹钟」）
+2. 切到 **自动化** 标签 → 右上角 `+` → **创建个人自动化**
+3. 选 **特定时间** → 设为每天 `22:00`（或你习惯的时间）→ 下一步
+4. 动作里选刚才建的「响课自动设闹钟」
+5. **关键一步**：关掉「运行前询问」；iOS 16 还会要求再关掉「运行时通知」，否则不会静默执行
 
-> 为什么不用 App Intent：`AppIntents` 框架是 Swift-first，本项目的构建链是纯 clang 编译 ObjC
-> （Windows 上没有 Xcode，见「构建」一节），引入 Swift 混编的代价远大于收益。
-> URL Scheme 同样能被快捷指令的定时自动化驱动，且实现简单、可控。
+这样每天到点，手机会自动唤起响课、算好次日第一节课、写好系统闹钟。
 
-## 数据存在哪
+## 常见问题
 
-课表存在磁盘上，重启 App 不会丢。因为本 App 带 `no-sandbox` entitlement，
-`NSDocumentDirectory` 在无沙箱进程里指向 `/var/mobile/Documents`（**不保证可写**），
-所以存储目录是**运行时探测**出来的：
+**Q：重启手机或 App 后课表会丢吗？**
+不会，课表保存在磁盘上。主页「存储自检」可以查看它存在哪、是否可写、上次保存是否成功。
 
-1. 已经存在 `class-alarm-timetable.json` 的目录优先（避免换路径后读不到旧数据）
-2. 否则按候选顺序挑第一个**真正可写**的（写探针文件 + 读回校验，不只看文件是否存在）
-   - `NSDocumentDirectory`
-   - `/var/mobile/Library/Preferences`（闹钟 plist 就落在这里，实测可写）
-   - `/var/mobile/Documents`
-   - 临时目录（兜底，重启会丢）
+**Q：点了「立即应用」，但时钟 App 里没看到闹钟？**
+1. 把系统「时钟」App 从后台划掉重开一次（它是懒加载的）
+2. 回响课看日志区有没有报错
+3. 如果**次日没有课**，响课会主动不设闹钟并清掉旧的课表闹钟 —— 这是正常行为
 
-主页「存储自检」按钮会显示：当前目录、是否可写、文件大小、上次保存结果。
-保存失败会直接弹窗报原因，不会静默。
+**Q：会误删我自己设的闹钟吗？**
+不会。响课只处理标题以 `课表|` 开头的闹钟。
+
+**Q：为什么不用 App Intent（让动作直接出现在快捷指令里）？**
+`AppIntents` 框架是 Swift-first，本项目构建链是纯 clang 编译 Objective-C，
+引入 Swift 混编的代价远大于收益。URL Scheme 同样能被定时自动化驱动。
+
+**Q：导入课表时报「只支持 https」？**
+iOS 默认禁止明文 http 请求。用 Gist 的 raw 地址（https）即可。
+
+## 开发
+
+想改代码、看架构和构建方式，见 [DEVELOPMENT.md](DEVELOPMENT.md)。

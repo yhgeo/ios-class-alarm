@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths-ignore:
       - 'README.md'
+      - 'DEVELOPMENT.md'
       - '.gitignore'
       - '.workbuddy-ai/**'
   workflow_dispatch:
