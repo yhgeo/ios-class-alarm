@@ -223,47 +223,63 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
 
 #pragma mark - 重载诊断
 
-/// 扫描系统二进制，找出 mobiletimerd / 时钟 App 里出现的通知名候选
+/// 扫描系统二进制，找出 mobiletimerd / 时钟 App 里出现的通知名候选。
+/// 先扫自己的可执行文件做自检 —— 用来区分「扫描逻辑有问题」和「系统文件读不到」。
 - (void)runReloadDiagnostics {
     self.navigationItem.prompt = @"扫描中…";
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSArray<NSString *> *daemonNames =
-            [self scanNotificationsInFile:@"/usr/libexec/mobiletimerd"];
-        NSArray<NSString *> *clockNames =
-            [self scanNotificationsInFile:@"/Applications/MobileTimer.app/MobileTimer"];
+        NSMutableString *report = [NSMutableString string];
+
+        // 自检：本 App 可执行文件里必然有 Alarm 相关符号
+        NSString *selfPath = [[NSBundle mainBundle] executablePath];
+        NSArray<NSString *> *selfHits = [CALDaemonReloader stringsInFile:selfPath
+                                                              containing:@"alarm"
+                                                                   limit:10];
+        [report appendFormat:@"【自检】本 App 可执行文件\n含 alarm 字符串：%lu 条 %@\n\n",
+            (unsigned long)selfHits.count,
+            selfHits.count > 0 ? @"→ 扫描逻辑正常" : @"⚠️ 扫描逻辑可能有问题"];
+
+        // 逐个试候选路径
+        NSArray<NSString *> *candidates = @[
+            @"/usr/libexec/mobiletimerd",
+            @"/System/Volumes/System/usr/libexec/mobiletimerd",
+            @"/Applications/MobileTimer.app/MobileTimer",
+            @"/System/Applications/MobileTimer.app/MobileTimer",
+        ];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        for (NSString *path in candidates) {
+            BOOL exists = [fm fileExistsAtPath:path];
+            NSDictionary *attr = exists ? [fm attributesOfItemAtPath:path error:nil] : nil;
+            unsigned long long size = [attr[NSFileSize] unsignedLongLongValue];
+
+            [report appendFormat:@"%@\n存在：%@", path, exists ? @"是" : @"否"];
+            if (exists) [report appendFormat:@"   大小：%llu", size];
+            [report appendString:@"\n"];
+
+            if (exists) {
+                NSArray<NSString *> *hits = [CALDaemonReloader stringsInFile:path
+                                                                  containing:@"alarm"
+                                                                       limit:8];
+                [report appendFormat:@"含 alarm：%lu 条\n", (unsigned long)hits.count];
+                for (NSString *s in hits) {
+                    [report appendFormat:@"  %@\n", [self shorten:s max:56]];
+                }
+            }
+            [report appendString:@"\n"];
+        }
 
         dispatch_async(dispatch_get_main_queue(), ^{
             self.navigationItem.prompt = nil;
-
-            NSMutableString *msg = [NSMutableString string];
-            [msg appendFormat:@"mobiletimerd：%lu 条\n", (unsigned long)daemonNames.count];
-            [msg appendString:(daemonNames.count
-                                ? [daemonNames componentsJoinedByString:@"\n"]
-                                : @"（无）")];
-            [msg appendFormat:@"\n\n时钟 App：%lu 条\n", (unsigned long)clockNames.count];
-            [msg appendString:(clockNames.count
-                                ? [clockNames componentsJoinedByString:@"\n"]
-                                : @"（无）")];
-
-            [self alertWithTitle:@"重载诊断（截图反馈）" message:msg];
+            [self alertWithTitle:@"重载诊断（截图反馈）" message:report];
         });
     });
 }
 
-- (NSArray<NSString *> *)scanNotificationsInFile:(NSString *)path {
-    NSArray<NSString *> *all = [CALDaemonReloader stringsInFile:path
-                                                     containing:@"alarm"
-                                                          limit:4000];
-    NSMutableOrderedSet<NSString *> *out = [NSMutableOrderedSet orderedSet];
-    for (NSString *s in all) {
-        // 只看像 Darwin 通知名的：com.apple. 开头、不含空格
-        if (![s hasPrefix:@"com.apple."]) continue;
-        if ([s containsString:@" "]) continue;
-        [out addObject:s];
-        if (out.count >= 30) break;
-    }
-    return out.array;
+- (NSString *)shorten:(NSString *)s max:(NSUInteger)max {
+    if (s.length <= max) return s;
+    return [[s substringToIndex:max] stringByAppendingString:@"…"];
 }
 
 #pragma mark - 工具
