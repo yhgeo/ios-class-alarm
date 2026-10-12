@@ -39,6 +39,8 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
 @interface CALApplier ()
 /// 时钟 App 把闹钟列表缓存在内存里，重启 mobiletimerd 它也不会刷新界面
 + (void)clearClockAppCacheWithLog:(NSMutableString *)log;
+/// 系统里所有标题带课表前缀的闹钟
++ (NSArray<CALSystemAlarm *> *)managedAlarms;
 @end
 
 @implementation CALApplier
@@ -47,12 +49,40 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
     NSMutableString *log = [NSMutableString string];
     NSDate *tomorrow = CALTomorrow();
 
+    // 0) 目标状态已经满足？满足就什么都不做 —— 连重启都省掉。
+    //    每天自动跑的场景下，课表没变是常态，这样能把副作用降到零。
+    NSArray<CALSystemAlarm *> *managed = [self managedAlarms];
+    CALCourse *firstCourse = [timetable firstCourseForDate:tomorrow];
+    NSDate *desired = [CALScheduleEngine alarmTimeForDate:tomorrow timetable:timetable];
+
+    if (!desired) {
+        if (managed.count == 0) {
+            [log appendString:@"· 次日无课，系统里也没有课表闹钟 —— 无需改动\n"];
+            return log;
+        }
+    } else {
+        NSDateComponents *c = [[NSCalendar currentCalendar]
+            components:(NSCalendarUnitHour | NSCalendarUnitMinute) fromDate:desired];
+        NSString *name = firstCourse.name.length > 0 ? firstCourse.name : @"未命名";
+        NSString *expectedTitle = [NSString stringWithFormat:@"%@%@ %@",
+                                   CAL_ALARM_TITLE_PREFIX, CALWeekdayName(tomorrow), name];
+
+        if (managed.count == 1) {
+            CALSystemAlarm *a = managed.firstObject;
+            if (a.hour == c.hour && a.minute == c.minute &&
+                a.enabled && [a.title isEqualToString:expectedTitle]) {
+                [log appendString:@"· 闹钟已是最新 —— 无需改动（跳过重启）\n"];
+                return log;
+            }
+        }
+    }
+
     // 1) 清理旧的课表闹钟
     NSInteger removed = [CALAlarmStore removeAlarmsWithTitlePrefix:CAL_ALARM_TITLE_PREFIX];
     [log appendFormat:@"· 清理旧课表闹钟：%ld 个\n", (long)removed];
 
     // 2) 计算目标时间
-    NSDate *target = [CALScheduleEngine alarmTimeForDate:tomorrow timetable:timetable];
+    NSDate *target = desired;
     if (!target) {
         [log appendString:@"· 次日无课，不设闹钟\n"];
         BOOL reloaded = [CALAlarmStore commitChanges];
@@ -61,7 +91,7 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
         return log;
     }
 
-    CALCourse *first = [timetable firstCourseForDate:tomorrow];
+    CALCourse *first = firstCourse;
     NSDateComponents *c = [[NSCalendar currentCalendar]
         components:(NSCalendarUnitHour | NSCalendarUnitMinute) fromDate:target];
 
@@ -87,6 +117,15 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
     }
 
     return log;
+}
+
+/// 系统里所有标题带课表前缀的闹钟
++ (NSArray<CALSystemAlarm *> *)managedAlarms {
+    NSMutableArray<CALSystemAlarm *> *out = [NSMutableArray array];
+    for (CALSystemAlarm *a in [CALAlarmStore allAlarms]) {
+        if ([a.title hasPrefix:CAL_ALARM_TITLE_PREFIX]) [out addObject:a];
+    }
+    return out;
 }
 
 /// 时钟 App 把闹钟列表缓存在内存里，光让 mobiletimerd 重读数据它并不会刷新界面。
