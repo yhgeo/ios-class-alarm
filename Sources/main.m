@@ -2,20 +2,24 @@
 //  main.m
 //  AlarmPoC
 //
-//  用途：验证在 TrollStore 环境下，能否通过私有框架 MobileTimer
-//        （MTAlarmManager / MTAlarm）读写系统「时钟」App 的闹钟。
+//  v2 诊断版
 //
-//  该验证是整个「课表闹钟自动化」方案的前提。若此处通过，
-//  则后续可完全绕开 iOS 16 快捷指令「无法删除闹钟」的限制。
+//  v1 结果：MTAlarmManager 能创建实例、能发消息，但 alarmsSync 返回 nil
+//           → XPC 通道没打通。需定位是「entitlement 未生效」还是「服务端拒绝」。
+//
+//  本版一次性采集四组证据：
+//    A. 进程实际持有的 entitlements（验证 ldid 注入是否真的生效）
+//    B. 沙箱逃逸能力（能否读 /var/mobile/Library/Preferences）
+//    C. 直连 com.apple.mobiletimerd 的 XPC 错误码
+//    D. 闹钟数据文件 com.apple.mobiletimerd.plist 的真实结构
 //
 
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import <dlfcn.h>
-
-#pragma mark - objc_msgSend 强类型转换
-// 私有类在编译期不可见，只能用运行时消息发送，因此需要显式转换函数指针类型。
+#import <xpc/xpc.h>
+#import <Security/Security.h>
 
 typedef id   (*Send_Id)(id, SEL);
 typedef id   (*Send_Id_Id)(id, SEL, id);
@@ -25,115 +29,157 @@ typedef id   (*Send_Id_UllUll)(id, SEL, unsigned long long, unsigned long long);
 
 static NSString *const kMobileTimerPath =
     @"/System/Library/PrivateFrameworks/MobileTimer.framework/MobileTimer";
+static NSString *const kAlarmPlistPath =
+    @"/var/mobile/Library/Preferences/com.apple.mobiletimerd.plist";
+static NSString *const kTimerdDomain = @"com.apple.mobiletimerd";
 
-#pragma mark - 诊断
+#pragma mark - A. entitlements
 
-/// 读取系统当前所有闹钟，返回可读描述；失败时返回错误说明。
-static NSString *DescribeExistingAlarms(id manager) {
-    @try {
-        id alarms = ((Send_Id)objc_msgSend)(manager, @selector(alarmsSync));
-        if (!alarms) {
-            return @"(alarmsSync 返回 nil)";
-        }
-        if ([alarms isKindOfClass:[NSArray class]]) {
-            NSArray *arr = (NSArray *)alarms;
-            NSMutableString *s = [NSMutableString stringWithFormat:@"共 %lu 个\n", (unsigned long)arr.count];
-            for (id a in arr) {
-                id title = ((Send_Id)objc_msgSend)(a, @selector(title));
-                unsigned long long hour = ((unsigned long long (*)(id, SEL))objc_msgSend)(a, @selector(hour));
-                unsigned long long minute = ((unsigned long long (*)(id, SEL))objc_msgSend)(a, @selector(minute));
-                bool enabled = ((bool (*)(id, SEL))objc_msgSend)(a, @selector(isEnabled));
-                [s appendFormat:@"    %02llu:%02llu  %@  %@\n",
-                    hour, minute, enabled ? @"[开]" : @"[关]", title ?: @"(无标题)"];
-            }
-            return s;
-        }
-        return [alarms description];
-    } @catch (NSException *e) {
-        return [NSString stringWithFormat:@"读取异常: %@", e.reason];
+static NSString *CheckEntitlements(void) {
+    NSMutableString *s = [NSMutableString string];
+    SecTaskRef task = SecTaskCreateFromSelf(kCFAllocatorDefault);
+    if (!task) {
+        [s appendString:@"    SecTaskCreateFromSelf 失败\n"];
+        return s;
     }
+    NSArray *keys = @[
+        @"platform-application",
+        @"com.apple.private.security.no-sandbox",
+        @"com.apple.private.mobiletimer",
+        @"application-identifier",
+        @"get-task-allow"
+    ];
+    for (NSString *k in keys) {
+        CFTypeRef v = SecTaskCopyValueForEntitlement(task, (__bridge CFStringRef)k, NULL);
+        [s appendFormat:@"    %@ = %@\n", k, v ? (__bridge id)v : @"(不存在)"];
+        if (v) CFRelease(v);
+    }
+    CFRelease(task);
+    return s;
 }
 
-/// 完整诊断流程：加载框架 → 定位类 → 建实例 → 读旧闹钟 → 建新闹钟 → 写回 → 复读验证
+#pragma mark - B. 文件系统
+
+static NSString *CheckFilesystem(void) {
+    NSMutableString *s = [NSMutableString string];
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    NSString *prefs = @"/var/mobile/Library/Preferences";
+    NSError *e = nil;
+    NSArray *list = [fm contentsOfDirectoryAtPath:prefs error:&e];
+    if (list) {
+        [s appendFormat:@"    可读 %@（%lu 项）\n", prefs, (unsigned long)list.count];
+        NSMutableArray *hits = [NSMutableArray array];
+        for (NSString *f in list) {
+            NSString *lf = f.lowercaseString;
+            if ([lf containsString:@"timer"] || [lf containsString:@"clock"] || [lf containsString:@"alarm"]) {
+                [hits addObject:f];
+            }
+        }
+        [s appendFormat:@"    相关文件: %@\n",
+            hits.count ? [hits componentsJoinedByString:@", "] : @"(无)"];
+    } else {
+        [s appendFormat:@"    不可读 %@ — %@\n", prefs, e.localizedDescription ?: @"未知错误"];
+    }
+
+    BOOL exists = [fm fileExistsAtPath:kAlarmPlistPath];
+    [s appendFormat:@"    com.apple.mobiletimerd.plist 存在: %@\n", exists ? @"是" : @"否"];
+
+    if (exists) {
+        NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:kAlarmPlistPath];
+        if (d) {
+            [s appendFormat:@"    解析成功，%lu 个顶层键\n", (unsigned long)d.count];
+            NSString *desc = [d description];
+            NSUInteger cap = 2200;
+            [s appendFormat:@"    ----- 内容开始 -----\n%@\n    ----- 内容结束（%@）-----\n",
+                desc.length > cap ? [desc substringToIndex:cap] : desc,
+                desc.length > cap ? @"已截断" : @"完整"];
+        } else {
+            [s appendString:@"    存在但解析失败（二进制 plist 或读取受限）\n"];
+        }
+    }
+    return s;
+}
+
+#pragma mark - C. XPC 直连
+
+static NSString *CheckXPC(void) {
+    __block NSString *result = @"(4 秒内无响应)";
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+
+    xpc_connection_t conn = xpc_connection_create_mach_service("com.apple.mobiletimerd", NULL, 0);
+    xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {
+        if (xpc_get_type(event) == XPC_TYPE_ERROR) {
+            const char *d = xpc_dictionary_get_string(event, XPC_ERROR_KEY_DESCRIPTION);
+            result = [NSString stringWithFormat:@"连接失败 — %s", d ? d : "unknown"];
+            dispatch_semaphore_signal(sem);
+        }
+    });
+    xpc_connection_resume(conn);
+
+    xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
+    xpc_dictionary_set_string(msg, "kMsgType", "ping");
+    xpc_connection_send_message_with_reply(conn, msg, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+        ^(xpc_object_t reply) {
+            if (xpc_get_type(reply) == XPC_TYPE_ERROR) {
+                const char *d = xpc_dictionary_get_string(reply, XPC_ERROR_KEY_DESCRIPTION);
+                result = [NSString stringWithFormat:@"回复错误 — %s", d ? d : "unknown"];
+            } else {
+                result = @"收到正常回复（服务可达）";
+            }
+            dispatch_semaphore_signal(sem);
+        });
+
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC));
+    return result;
+}
+
+#pragma mark - D. v1 路径复核
+
+static NSString *CheckAlarmManager(void) {
+    NSMutableString *s = [NSMutableString string];
+    void *h = dlopen(kMobileTimerPath.UTF8String, RTLD_NOW);
+    [s appendFormat:@"    dlopen: %@\n", h ? @"成功" : @"失败"];
+    if (!h) return s;
+
+    Class mgrCls = NSClassFromString(@"MTAlarmManager");
+    if (!mgrCls) {
+        [s appendString:@"    MTAlarmManager 缺失\n"];
+        return s;
+    }
+    id manager = ((Send_Id)objc_msgSend)(((Send_Id)objc_msgSend)(mgrCls, @selector(alloc)), @selector(init));
+    [s appendFormat:@"    manager: %@\n", manager ? @"创建成功" : @"创建失败"];
+    if (!manager) return s;
+
+    @try {
+        id alarms = ((Send_Id)objc_msgSend)(manager, @selector(alarmsSync));
+        [s appendFormat:@"    alarmsSync: %@\n", alarms ?: @"nil"];
+    } @catch (NSException *e) {
+        [s appendFormat:@"    alarmsSync 异常: %@\n", e.reason];
+    }
+
+    @try {
+        id provider = ((Send_Id)objc_msgSend)(manager, @selector(connectionProvider));
+        [s appendFormat:@"    connectionProvider: %@\n", provider ?: @"nil"];
+    } @catch (NSException *e) {
+        [s appendFormat:@"    connectionProvider 异常: %@\n", e.reason];
+    }
+    return s;
+}
+
+#pragma mark - 汇总
+
 static NSString *RunDiagnostics(void) {
     NSMutableString *out = [NSMutableString string];
-
-    // 1. 加载私有框架
-    void *handle = dlopen(kMobileTimerPath.UTF8String, RTLD_NOW);
-    if (!handle) {
-        const char *err = dlerror();
-        [out appendFormat:@"[1] dlopen MobileTimer ........ 失败\n    %s\n", err ? err : "unknown"];
-        return out;
-    }
-    [out appendString:@"[1] dlopen MobileTimer ........ 成功\n"];
-
-    // 2. 定位私有类
-    Class mgrCls   = NSClassFromString(@"MTAlarmManager");
-    Class alarmCls = NSClassFromString(@"MTAlarm");
-    [out appendFormat:@"[2] MTAlarmManager ............. %@\n", mgrCls ? @"找到" : @"缺失"];
-    [out appendFormat:@"[3] MTAlarm ................... %@\n", alarmCls ? @"找到" : @"缺失"];
-    if (!mgrCls || !alarmCls) {
-        [out appendString:@"\n结论：框架存在但类缺失，方案需调整。\n"];
-        return out;
-    }
-
-    // 3. 建实例（iOS 16 无 +alarmManager 单例，须 alloc/init）
-    id manager = nil;
-    @try {
-        manager = ((Send_Id)objc_msgSend)(((Send_Id)objc_msgSend)(mgrCls, @selector(alloc)), @selector(init));
-    } @catch (NSException *e) {
-        [out appendFormat:@"[4] manager 实例 .............. 异常: %@\n", e.reason];
-        return out;
-    }
-    [out appendFormat:@"[4] manager 实例 .............. %@\n", manager ? @"创建成功" : @"创建失败"];
-    if (!manager) return out;
-
-    // 4. 读旧闹钟（验证 XPC 通道是否打通）
-    [out appendString:@"[5] 读取现有闹钟 ..............\n"];
-    [out appendFormat:@"    %@\n", DescribeExistingAlarms(manager)];
-
-    // 5. 构造 +5 分钟的一次性闹钟
-    NSDate *fire = [NSDate dateWithTimeIntervalSinceNow:300];
-    NSDateComponents *c = [[NSCalendar currentCalendar]
-        components:(NSCalendarUnitHour | NSCalendarUnitMinute) fromDate:fire];
-
-    id alarm = nil;
-    @try {
-        alarm = ((Send_Id_UllUll)objc_msgSend)(alarmCls, @selector(alarmWithHour:minute:),
-                                               (unsigned long long)c.hour,
-                                               (unsigned long long)c.minute);
-    } @catch (NSException *e) {
-        [out appendFormat:@"[6] 创建 MTAlarm .............. 异常: %@\n", e.reason];
-        return out;
-    }
-    [out appendFormat:@"[6] 创建 MTAlarm .............. %@\n", alarm ? @"成功" : @"失败"];
-    if (!alarm) return out;
-
-    // 6. 设置属性
-    @try {
-        ((Send_Void_Id)objc_msgSend)(alarm, @selector(setTitle:), @"课表PoC");
-        ((Send_Void_Bool)objc_msgSend)(alarm, @selector(setEnabled:), true);
-        [out appendFormat:@"[7] 设置标题/启用 ............. 完成，目标时间 %02ld:%02ld\n",
-            (long)c.hour, (long)c.minute];
-    } @catch (NSException *e) {
-        [out appendFormat:@"[7] 设置属性 .................. 异常: %@\n", e.reason];
-    }
-
-    // 7. 写回
-    @try {
-        id result = ((Send_Id_Id)objc_msgSend)(manager, @selector(addAlarm:), alarm);
-        [out appendFormat:@"[8] addAlarm 调用 ............. %@\n", result ? @"有返回" : @"返回 nil"];
-    } @catch (NSException *e) {
-        [out appendFormat:@"[8] addAlarm 调用 ............. 异常: %@\n", e.reason];
-        return out;
-    }
-
-    // 8. 等待 XPC 落盘后复读验证
-    [NSThread sleepForTimeInterval:2.0];
-    [out appendString:@"[9] 复读验证 (2 秒后) .........\n"];
-    [out appendFormat:@"    %@\n", DescribeExistingAlarms(manager)];
-
-    [out appendString:@"\n完成。请同时打开系统「时钟」App 核对。\n"];
+    [out appendString:@"===== A. 进程实际 entitlements =====\n"];
+    [out appendString:CheckEntitlements()];
+    [out appendString:@"\n===== B. 沙箱外文件访问 =====\n"];
+    [out appendString:CheckFilesystem()];
+    [out appendString:@"\n===== C. XPC 直连 mobiletimerd =====\n"];
+    [out appendFormat:@"    %@\n", CheckXPC()];
+    [out appendString:@"\n===== D. MTAlarmManager 复核 =====\n"];
+    [out appendString:CheckAlarmManager()];
+    [out appendString:@"\n===== 采集完成 ====="];
     return out;
 }
 
@@ -148,18 +194,17 @@ static NSString *RunDiagnostics(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemBackgroundColor];
-
     CGFloat w = self.view.bounds.size.width;
 
     UILabel *title = [[UILabel alloc] initWithFrame:CGRectMake(20, 64, w - 40, 30)];
-    title.text = @"MobileTimer 私有 API 验证";
+    title.text = @"MobileTimer 诊断 v2";
     title.font = [UIFont boldSystemFontOfSize:17];
     title.textAlignment = NSTextAlignmentCenter;
     [self.view addSubview:title];
 
     UIButton *b1 = [UIButton buttonWithType:UIButtonTypeSystem];
     b1.frame = CGRectMake(20, 110, w - 40, 50);
-    [b1 setTitle:@"创建闹钟（+5 分钟）" forState:UIControlStateNormal];
+    [b1 setTitle:@"开始采集诊断信息" forState:UIControlStateNormal];
     [b1 setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     b1.backgroundColor = [UIColor systemBlueColor];
     b1.layer.cornerRadius = 10;
@@ -171,14 +216,14 @@ static NSString *RunDiagnostics(void) {
     self.textView.autoresizingMask = UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
     self.textView.editable = NO;
     self.textView.backgroundColor = [UIColor secondarySystemBackgroundColor];
-    self.textView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
+    self.textView.font = [UIFont monospacedSystemFontOfSize:10 weight:UIFontWeightRegular];
     self.textView.layer.cornerRadius = 10;
-    self.textView.text = @"点击上方按钮开始验证。\n\n成功后请打开系统「时钟」App 查看是否出现 5 分钟后的闹钟。";
+    self.textView.text = @"点上方按钮开始采集。\n\n只读诊断，不会修改任何数据。";
     [self.view addSubview:self.textView];
 }
 
 - (void)onRun {
-    self.textView.text = @"执行中，请稍候…";
+    self.textView.text = @"采集中，约需 5 秒…";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *report = RunDiagnostics();
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -189,7 +234,7 @@ static NSString *RunDiagnostics(void) {
 
 @end
 
-#pragma mark - App 入口
+#pragma mark - 入口
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 @property (nonatomic, strong) UIWindow *window;

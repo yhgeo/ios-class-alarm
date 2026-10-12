@@ -30,6 +30,7 @@ jobs:
             -O1 \
             -framework UIKit \
             -framework Foundation \
+            -framework Security \
             -o "$APP/AlarmPoC" \
             Sources/main.m
           cp Sources/Info.plist "$APP/Info.plist"
