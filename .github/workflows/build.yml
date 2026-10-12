@@ -43,30 +43,65 @@ jobs:
           done
 
           # ---------- 2) Swift → .o ----------
-          # 尝试让编译器额外产出常量值 sidecar（.swiftconstvalues），
-          # 它是「编译期提取」App Intents 元数据的输入。
-          # 注意：该 flag 可能被接受却什么都不写，所以判断依据是「文件是否真的存在」，
-          # 而不是退出码。
-          CV="$OBJ/XiangKeIntent.swiftconstvalues"
-          xcrun --sdk iphoneos swiftc \
-            -target arm64-apple-ios16.0 -sdk "$SDK" -O \
-            -module-name XiangKe -parse-as-library \
-            -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
-            -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
-            2> build/swift-err.log || true
+          # App Intents 的元数据**必须**由编译器产出的常量值 sidecar 驱动
+          # （处理器会明确报错：No swift const values found ... cannot be extracted）。
+          # 该 flag 在不同 Xcode 版本上写法不一，且可能被接受却什么都不写 ——
+          # 所以判断依据是「文件是否真的出现」，并且依次试几种写法。
+          echo "===== swift-frontend 中 const-value 相关选项 ====="
+          xcrun --sdk iphoneos swift-frontend -help-hidden 2>&1 | grep -i "const-value" || echo "(无匹配)"
+          echo "================================================="
 
-          if [ -f "$CV" ]; then
-            echo "✓ 已产出常量值 sidecar"
-          elif [ -f "$OBJ/XiangKeIntent.o" ]; then
-            echo "· 无 sidecar（此 Xcode 版本不产出），保留已编译对象"
-          else
-            echo "⚠️ 首次编译失败，退回普通编译："
-            cat build/swift-err.log || true
+          CV="$OBJ/XiangKeIntent.swiftconstvalues"
+          PROTOS="AppIntent AppEntity EntityQuery AppEnum AppShortcutsProvider AppShortcutProviding AppIntentsPackage DynamicOptionsProvider AnyResolverProviding TransientEntity"
+
+          gen_sidecar() {
+            label="$1"; shift
+            rm -f "$OBJ/XiangKeIntent.o" "$CV"
             xcrun --sdk iphoneos swiftc \
-              -target arm64-apple-ios16.0 -sdk "$SDK" -O \
+              -target arm64-apple-ios16.0 -sdk "$SDK" \
+              -module-name XiangKe -parse-as-library \
+              "$@" -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
+              >/dev/null 2>&1 || true
+
+            for cand in "$CV" "$OBJ/XiangKeIntent.o.swiftconstvalues" \
+                        "$OBJ/XiangKeIntent.swiftconstvalues"; do
+              if [ -f "$cand" ]; then
+                if [ "$cand" != "$CV" ]; then cp -f "$cand" "$CV"; fi
+                echo "✓ 常量值 sidecar 产出成功 ← 参数 [$label]"
+                return 0
+              fi
+            done
+            echo "· 参数 [$label] 未产出 sidecar"
+            return 1
+          }
+
+          gen_sidecar "A 仅路径" \
+              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+            || gen_sidecar "B 开关+路径" \
+              -Xfrontend -emit-const-values \
+              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+            || gen_sidecar "C 开关+协议表" \
+              -Xfrontend -emit-const-values \
+              -Xfrontend -emit-const-value-protocols -Xfrontend "$PROTOS" \
+            || gen_sidecar "D driver 路径" \
+              -emit-const-values-path "$CV" \
+            || true
+
+          if [ ! -f "$OBJ/XiangKeIntent.o" ]; then
+            echo "⚠️ 以上写法都没成功，退回普通编译"
+            xcrun --sdk iphoneos swiftc \
+              -target arm64-apple-ios16.0 -sdk "$SDK" \
               -module-name XiangKe -parse-as-library \
               -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o"
           fi
+
+          if [ -f "$CV" ]; then
+            echo "--- sidecar 内容（前 40 行）---"
+            head -40 "$CV" || true
+          else
+            echo "⚠️ 最终仍无 sidecar —— 元数据提取大概率会失败"
+          fi
+
           echo "--- objects ---"
           ls -la "$OBJ"
 
@@ -146,22 +181,22 @@ jobs:
           }
 
           ok=0
-          for mode in --legacy-extraction __default__; do
-            echo "===== 尝试：$mode ====="
-            if [ "$mode" = "__default__" ]; then
-              if base_args; then ok=1; break; fi
-            else
-              if base_args "$mode"; then ok=1; break; fi
-            fi
-            echo "（该参数组合失败，继续下一种）"
-          done
-
-          if [ "$ok" -ne 1 ] && [ "$HAS_CV" -eq 1 ]; then
-            echo "===== 尝试：编译期提取 ====="
+          if [ "$HAS_CV" -eq 1 ]; then
+            echo "===== 尝试：编译期提取（带常量值 sidecar）====="
             if base_args --swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
                          --compile-time-extraction; then
               ok=1
             fi
+          fi
+
+          if [ "$ok" -ne 1 ]; then
+            echo "===== 尝试：默认提取 ====="
+            if base_args; then ok=1; fi
+          fi
+
+          if [ "$ok" -ne 1 ]; then
+            echo "===== 尝试：legacy 提取（扫二进制）====="
+            if base_args --legacy-extraction; then ok=1; fi
           fi
 
           [ "$ok" -eq 1 ] || { echo "❌ 所有参数组合都失败"; exit 1; }
