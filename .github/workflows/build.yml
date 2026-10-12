@@ -75,17 +75,48 @@ jobs:
             return 1
           }
 
-          gen_sidecar "A 仅路径" \
+          gen_sidecar "A driver -Xfrontend" \
+              -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
+
+          # 诊断：看驱动究竟怎么调前端（模式、是否带 -primary-file）
+          if [ ! -f "$CV" ]; then
+            echo "--- swiftc -### （前端真实命令行）---"
+            xcrun --sdk iphoneos swiftc \
+              -target arm64-apple-ios16.0 -sdk "$SDK" \
+              -module-name XiangKe -parse-as-library \
               -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
-            || gen_sidecar "B 开关+路径" \
-              -Xfrontend -emit-const-values \
-              -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
-            || gen_sidecar "C 开关+协议表" \
-              -Xfrontend -emit-const-values \
-              -Xfrontend -emit-const-value-protocols -Xfrontend "$PROTOS" \
-            || gen_sidecar "D driver 路径" \
+              -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" -### 2>&1 \
+              | head -12 || true
+          fi
+
+          # B：直接调用 swift-frontend，带 -primary-file（Xcode 就是这么调的）
+          if [ ! -f "$CV" ]; then
+            echo "--- 尝试 B：直接调用 swift-frontend ---"
+            rm -f "$OBJ/XiangKeIntent.o"
+            xcrun --sdk iphoneos swift-frontend -frontend -c \
+              -primary-file Sources/XiangKeIntent.swift \
+              -target arm64-apple-ios16.0 -sdk "$SDK" \
+              -module-name XiangKe -parse-as-library -swift-version 5 \
+              -enable-objc-interop \
               -emit-const-values-path "$CV" \
-            || true
+              -o "$OBJ/XiangKeIntent.o" 2>&1 | head -15 || true
+            if [ -f "$CV" ]; then echo "✓ B 成功"; else echo "· B 未产出"; fi
+          fi
+
+          # C：走输出文件映射（Xcode 的实际做法之一）
+          if [ ! -f "$CV" ]; then
+            echo "--- 尝试 C：output-file-map ---"
+            printf '{\n  "Sources/XiangKeIntent.swift": {\n    "object": "%s",\n    "swiftconstvalues": "%s"\n  }\n}\n' \
+              "$PWD/$OBJ/XiangKeIntent.o" "$PWD/$CV" > build/ofm.json
+            cat build/ofm.json
+            rm -f "$OBJ/XiangKeIntent.o"
+            xcrun --sdk iphoneos swiftc -target arm64-apple-ios16.0 -sdk "$SDK" \
+              -module-name XiangKe -parse-as-library \
+              -output-file-map build/ofm.json \
+              -emit-const-values-path "$CV" \
+              -c Sources/XiangKeIntent.swift 2>&1 | head -10 || true
+            if [ -f "$CV" ]; then echo "✓ C 成功"; else echo "· C 未产出"; fi
+          fi
 
           if [ ! -f "$OBJ/XiangKeIntent.o" ]; then
             echo "⚠️ 以上写法都没成功，退回普通编译"
@@ -199,7 +230,11 @@ jobs:
             if base_args --legacy-extraction; then ok=1; fi
           fi
 
-          [ "$ok" -eq 1 ] || { echo "❌ 所有参数组合都失败"; exit 1; }
+          if [ "$ok" -ne 1 ]; then
+            echo "⚠️ 元数据未生成 —— App Intent 动作不会出现在快捷指令里。"
+            echo "   构建继续：其余功能（URL Scheme / 后台刷新 / 锁屏探针）不受影响。"
+            exit 0
+          fi
 
           echo "--- Metadata.appintents ---"
           ls -la "$APP/Metadata.appintents" || { echo "❌ 没有产出 Metadata.appintents"; exit 1; }
@@ -219,6 +254,11 @@ jobs:
           ldid -Sentitlements.plist "$APP/XiangKe"
           echo "----- applied entitlements -----"
           ldid -e "$APP/XiangKe"
+          if [ -d "$APP/Metadata.appintents" ]; then
+            echo "✓ 包内含 App Intents 元数据"
+          else
+            echo "⚠️ 包内不含 App Intents 元数据（快捷指令里不会出现动作）"
+          fi
           rm -f out/XiangKe.ipa
           cd out
           zip -qry XiangKe.ipa Payload

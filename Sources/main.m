@@ -17,6 +17,7 @@
 #import "CALHomeViewController.h"
 #import "CALApplier.h"
 #import "CALTimetable.h"
+#import "CALProbe.h"
 
 /// 快捷指令定时自动化用的 URL Scheme：xiangke://apply
 static NSString * const kCALURLScheme = @"xiangke";
@@ -77,6 +78,7 @@ static const NSTimeInterval kCALAutoRefreshInterval = 3 * 3600;   // 3 小时
     }
 
     if ([action isEqualToString:@"apply"]) {
+        [CALProbe runWithTrigger:@"URL 唤起（快捷指令）"];
         [CALApplier applyTimetableFromURLTrigger];
     }
     return YES;
@@ -120,6 +122,10 @@ static const NSTimeInterval kCALAutoRefreshInterval = 3 * 3600;   // 3 小时
     };
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        // 记一条探针：后台唤醒常常发生在锁屏时，正好用来验证
+        // 「锁屏下能不能访问系统文件」—— 这是整套方案的成败关键。
+        NSLog(@"[响课·后台] %@", [CALProbe runWithTrigger:@"后台刷新（系统唤醒）"]);
+
         CALTimetable *timetable = [CALTimetableStore shared].timetable;
         NSString *log = [CALApplier applyTimetable:timetable];
         NSLog(@"[响课·后台] %@", log);

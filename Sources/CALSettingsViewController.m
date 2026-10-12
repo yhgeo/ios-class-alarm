@@ -5,20 +5,18 @@
 #import "CALSettingsViewController.h"
 #import "CALTimetable.h"
 #import "CALDaemonReloader.h"
+#import "CALProbe.h"
 
 static NSString * const kCellID = @"CALSettingCell";
 
 typedef NS_ENUM(NSInteger, CALSettingSection) {
     CALSettingSectionAlarm = 0,     // 提前提醒
     CALSettingSectionTimetable,     // 载入示例课表
-    CALSettingSectionIntentProbe,   // App Intent 探针结果
+    CALSettingSectionIntentProbe,   // 锁屏探针
     CALSettingSectionDiagnostics,   // 存储自检
     CALSettingSectionReload,        // 重载诊断
     CALSettingSectionCount,
 };
-
-/// 探针日志文件名 —— 必须与 XiangKeIntent.swift 里的常量一致
-static NSString * const kProbeFileName = @"xiangke-probe.log";
 
 @interface CALSettingsViewController () <UITableViewDataSource, UITableViewDelegate>
 @property (nonatomic, strong) UITableView *tableView;
@@ -61,6 +59,8 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    // 「锁屏探针」下有两行：跑一次 / 查看记录
+    if (section == CALSettingSectionIntentProbe) return 2;
     return 1;
 }
 
@@ -84,9 +84,15 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
             break;
 
         case CALSettingSectionIntentProbe:
-            cell.textLabel.text = @"App Intent 探针";
-            cell.detailTextLabel.text = @"查看锁屏执行记录";
-            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            if (indexPath.row == 0) {
+                cell.textLabel.text = @"跑一次探针";
+                cell.detailTextLabel.text = @"记录此刻是否锁屏、能否访问系统文件";
+                cell.accessoryType = UITableViewCellAccessoryNone;
+            } else {
+                cell.textLabel.text = @"查看记录";
+                cell.detailTextLabel.text = @"历次执行留下的记录";
+                cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            }
             break;
 
         case CALSettingSectionDiagnostics:
@@ -125,9 +131,9 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
         return @"闹钟时间 = 当天第一节课开始时间 − 提前量";
     }
     if (section == CALSettingSectionIntentProbe) {
-        return @"锁屏时系统禁止「打开 App / 打开 URL」，所以 xiangke://apply 那条路在锁屏必定失败。\n"
-                "App Intent 动作不进入前台，理论上锁屏可用 —— 这里显示实测结果。\n"
-                "用法：快捷指令里添加动作「响课锁屏探针」，配一条定时自动化跑一次，再回来看。";
+        return @"锁屏时系统禁止「打开 App / 打开 URL」，所以 xiangke://apply 在锁屏必定失败。\n"
+                "后台刷新与 App Intent 都能在锁屏下执行，但**能否读写系统文件**要实测 ——"
+                "系统偏好文件受数据保护限制，锁屏时可能直接读写失败。";
     }
     if (section == CALSettingSectionDiagnostics) {
         return @"课表保存在磁盘上，重启 App 不会丢。保存失败会在这里显示原因。";
@@ -152,7 +158,11 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
             [self confirmLoadSample];
             break;
         case CALSettingSectionIntentProbe:
-            [self showIntentProbe];
+            if (indexPath.row == 0) {
+                [self runProbeManually];
+            } else {
+                [self showIntentProbe];
+            }
             break;
         case CALSettingSectionDiagnostics:
             [self showDiagnostics];
@@ -240,36 +250,30 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
                  message:[[CALTimetableStore shared] storageDiagnostics]];
 }
 
-#pragma mark - App Intent 探针
+#pragma mark - 锁屏探针
 
-/// 读取探针日志 —— 由 Swift 侧的 App Intent 在后台（可能锁屏）写入
+/// 手动跑一次 —— 用来拿一条「已知解锁状态」的基准记录做对照
+- (void)runProbeManually {
+    NSString *report = [CALProbe runWithTrigger:@"手动（App 内）"];
+    [self alertWithTitle:@"已记录一次" message:report];
+}
+
 - (void)showIntentProbe {
-    NSMutableString *scanned = [NSMutableString string];
-    NSString *found = nil;
-    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *content = [CALProbe readLog];
 
-    for (NSString *dir in [self probeCandidateDirs]) {
-        if (dir.length == 0) continue;
-        NSString *path = [dir stringByAppendingPathComponent:kProbeFileName];
-        BOOL exists = [fm fileExistsAtPath:path];
-        [scanned appendFormat:@"%@ %@\n", exists ? @"✓" : @"·", path];
-        if (exists && !found) found = path;
-    }
-
-    if (found.length == 0) {
-        [self alertWithTitle:@"App Intent 探针"
+    if (content.length == 0) {
+        NSMutableString *scanned = [NSMutableString string];
+        for (NSString *p in [CALProbe candidatePaths]) {
+            [scanned appendFormat:@"· %@\n", p];
+        }
+        [self alertWithTitle:@"探针记录"
                      message:[NSString stringWithFormat:
             @"还没有记录。\n\n已检查这些位置：\n%@\n"
-             "请先在「快捷指令」里添加动作「响课锁屏探针」，配一条定时自动化跑一次，再回来看。\n\n"
-             "若快捷指令里根本找不到这个动作，说明元数据没生成成功，请反馈。",
+             "点上一行「跑一次探针」可立即产生一条；\n"
+             "App 被系统在后台唤醒时（锁屏也可能）也会自动记一条。",
             scanned]];
         return;
     }
-
-    NSString *content = [NSString stringWithContentsOfFile:found
-                                                 encoding:NSUTF8StringEncoding
-                                                    error:nil];
-    if (content.length == 0) content = @"（文件为空）";
 
     // 只显示最近的部分，避免弹窗过长
     static const NSUInteger kMaxLen = 3000;
@@ -280,18 +284,6 @@ static NSString * const kProbeFileName = @"xiangke-probe.log";
     }
 
     [self alertWithTitle:@"探针记录" message:content];
-}
-
-/// 必须与 XiangKeIntent.swift 里的 candidateDirs 保持一致
-- (NSArray<NSString *> *)probeCandidateDirs {
-    NSMutableArray<NSString *> *dirs = [NSMutableArray array];
-    NSString *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-                                                         NSUserDomainMask, YES).firstObject;
-    if (docs.length) [dirs addObject:docs];
-    [dirs addObject:@"/var/mobile/Documents"];
-    [dirs addObject:@"/var/mobile/Library/Preferences"];
-    [dirs addObject:NSTemporaryDirectory()];
-    return dirs;
 }
 
 #pragma mark - 重载诊断
