@@ -36,6 +36,11 @@ static NSDate *CALTomorrow(void) {
 
 NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
 
+@interface CALApplier ()
+/// 时钟 App 把闹钟列表缓存在内存里，重启 mobiletimerd 它也不会刷新界面
++ (void)clearClockAppCacheWithLog:(NSMutableString *)log;
+@end
+
 @implementation CALApplier
 
 + (NSString *)applyTimetable:(CALTimetable *)timetable {
@@ -50,8 +55,9 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
     NSDate *target = [CALScheduleEngine alarmTimeForDate:tomorrow timetable:timetable];
     if (!target) {
         [log appendString:@"· 次日无课，不设闹钟\n"];
-        [CALAlarmStore commitChanges];
-        [log appendString:@"· 已提交并触发重载\n"];
+        BOOL reloaded = [CALAlarmStore commitChanges];
+        [log appendFormat:@"· 触发系统重载：%@\n", reloaded ? @"已发出" : @"失败"];
+        if (reloaded) [self clearClockAppCacheWithLog:log];
         return log;
     }
 
@@ -76,10 +82,23 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
     [log appendFormat:@"· 触发系统重载：%@\n", reloaded ? @"已发出" : @"失败（未找到守护进程）"];
     if (reloaded) {
         BOOL ready = [CALDaemonReloader waitUntilReadyWithTimeout:6.0];
-        [log appendFormat:@"· 等待服务就绪：%@\n", ready ? @"完成" : @"超时（可稍后在时钟 App 查看）"];
+        [log appendFormat:@"· 等待服务就绪：%@\n", ready ? @"完成" : @"超时"];
+        [self clearClockAppCacheWithLog:log];
     }
 
     return log;
+}
+
+/// 时钟 App 把闹钟列表缓存在内存里，光让 mobiletimerd 重读数据它并不会刷新界面。
+/// 让它退出，用户下次打开就是冷启动，直接读新数据。
++ (void)clearClockAppCacheWithLog:(NSMutableString *)log {
+    if ([CALDaemonReloader isClockAppRunning]) {
+        BOOL killed = [CALDaemonReloader killClockAppIfRunning];
+        [log appendFormat:@"· 清时钟 App 缓存：%@\n",
+            killed ? @"已让它退出（下次打开就能看到）" : @"失败"];
+    } else {
+        [log appendString:@"· 时钟 App 未运行，无需清缓存\n"];
+    }
 }
 
 + (NSInteger)clearManagedAlarms {

@@ -17,8 +17,19 @@ NS_ASSUME_NONNULL_BEGIN
 /// 重启 mobiletimerd（launchd 会自动拉起并重读数据）
 + (BOOL)restartAlarmDaemon;
 
-/// 等待守护进程重新就绪，最多等待 timeout 秒；返回是否就绪
+/// 等待守护进程重新就绪（PID 与重启前不同才算就绪），最多等待 timeout 秒
 + (BOOL)waitUntilReadyWithTimeout:(NSTimeInterval)timeout;
+
+/// 时钟 App（MobileTimer）是否在运行
++ (BOOL)isClockAppRunning;
+
+/// 让时钟 App 退出，清掉它的界面缓存。没在运行就什么都不做。
++ (BOOL)killClockAppIfRunning;
+
+/// 扫描二进制里的可打印字符串（用于找系统通知名）
++ (NSArray<NSString *> *)stringsInFile:(NSString *)path
+                            containing:(NSString *)keyword
+                                 limit:(NSUInteger)limit;
 
 @end
 

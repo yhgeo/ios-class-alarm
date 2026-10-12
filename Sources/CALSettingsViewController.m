@@ -4,6 +4,7 @@
 
 #import "CALSettingsViewController.h"
 #import "CALTimetable.h"
+#import "CALDaemonReloader.h"
 
 static NSString * const kCellID = @"CALSettingCell";
 
@@ -11,6 +12,7 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
     CALSettingSectionAlarm = 0,     // 提前提醒
     CALSettingSectionTimetable,     // 载入示例课表
     CALSettingSectionDiagnostics,   // 存储自检
+    CALSettingSectionReload,        // 重载诊断
     CALSettingSectionCount,
 };
 
@@ -83,6 +85,12 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
             cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
             break;
 
+        case CALSettingSectionReload:
+            cell.textLabel.text = @"重载诊断";
+            cell.detailTextLabel.text = @"扫描系统通知名";
+            cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+            break;
+
         default:
             break;
     }
@@ -95,6 +103,7 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
         case CALSettingSectionAlarm:       return @"闹钟";
         case CALSettingSectionTimetable:   return @"课表";
         case CALSettingSectionDiagnostics: return @"诊断";
+        case CALSettingSectionReload:      return @"重载诊断";
         default: return nil;
     }
 }
@@ -106,6 +115,10 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
     }
     if (section == CALSettingSectionDiagnostics) {
         return @"课表保存在磁盘上，重启 App 不会丢。保存失败会在这里显示原因。";
+    }
+    if (section == CALSettingSectionReload) {
+        return @"扫描 mobiletimerd 与时钟 App 的可执行文件，找出系统内部用的通知名 —— "
+                "用来把「重启守护进程」换成更温和的通知方式。结果请截图反馈。";
     }
     return nil;
 }
@@ -124,6 +137,9 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
             break;
         case CALSettingSectionDiagnostics:
             [self showDiagnostics];
+            break;
+        case CALSettingSectionReload:
+            [self runReloadDiagnostics];
             break;
         default:
             break;
@@ -203,6 +219,51 @@ typedef NS_ENUM(NSInteger, CALSettingSection) {
 - (void)showDiagnostics {
     [self alertWithTitle:@"存储自检"
                  message:[[CALTimetableStore shared] storageDiagnostics]];
+}
+
+#pragma mark - 重载诊断
+
+/// 扫描系统二进制，找出 mobiletimerd / 时钟 App 里出现的通知名候选
+- (void)runReloadDiagnostics {
+    self.navigationItem.prompt = @"扫描中…";
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSArray<NSString *> *daemonNames =
+            [self scanNotificationsInFile:@"/usr/libexec/mobiletimerd"];
+        NSArray<NSString *> *clockNames =
+            [self scanNotificationsInFile:@"/Applications/MobileTimer.app/MobileTimer"];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.navigationItem.prompt = nil;
+
+            NSMutableString *msg = [NSMutableString string];
+            [msg appendFormat:@"mobiletimerd：%lu 条\n", (unsigned long)daemonNames.count];
+            [msg appendString:(daemonNames.count
+                                ? [daemonNames componentsJoinedByString:@"\n"]
+                                : @"（无）")];
+            [msg appendFormat:@"\n\n时钟 App：%lu 条\n", (unsigned long)clockNames.count];
+            [msg appendString:(clockNames.count
+                                ? [clockNames componentsJoinedByString:@"\n"]
+                                : @"（无）")];
+
+            [self alertWithTitle:@"重载诊断（截图反馈）" message:msg];
+        });
+    });
+}
+
+- (NSArray<NSString *> *)scanNotificationsInFile:(NSString *)path {
+    NSArray<NSString *> *all = [CALDaemonReloader stringsInFile:path
+                                                     containing:@"alarm"
+                                                          limit:4000];
+    NSMutableOrderedSet<NSString *> *out = [NSMutableOrderedSet orderedSet];
+    for (NSString *s in all) {
+        // 只看像 Darwin 通知名的：com.apple. 开头、不含空格
+        if (![s hasPrefix:@"com.apple."]) continue;
+        if ([s containsString:@" "]) continue;
+        [out addObject:s];
+        if (out.count >= 30) break;
+    }
+    return out.array;
 }
 
 #pragma mark - 工具
