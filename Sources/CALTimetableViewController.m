@@ -8,16 +8,14 @@
 
 #import "CALTimetableViewController.h"
 #import "CALCourseEditorViewController.h"
-#import "CALOverrideViewController.h"
 #import "CALTimetable.h"
 
 static NSString * const kCourseCellID  = @"CALCourseCell";
 static NSString * const kSettingCellID = @"CALSettingCell";
 
-/// section 布局：0 = 闹钟设置，1 = 临时调整，2 起 = 有课的星期
+/// section 布局：0 = 闹钟设置，1 起 = 有课的星期
 static const NSInteger kSettingSection      = 0;
-static const NSInteger kOverrideSection     = 1;
-static const NSInteger kFirstWeekdaySection = 2;
+static const NSInteger kFirstWeekdaySection = 1;
 
 static NSArray<NSString *> *CALWeekdayNames(void) {
     static NSArray<NSString *> *names = nil;
@@ -129,8 +127,7 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
-    if (section == kSettingSection)  return 1;   // 提前量
-    if (section == kOverrideSection) return 1;   // 临时调整入口
+    if (section == kSettingSection) return 1;   // 提前量
     NSInteger weekday = [self weekdayForSection:section];
     if (weekday == 0) return 0;
     return (NSInteger)[self coursesForWeekday:weekday].count;
@@ -148,17 +145,6 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
         return cell;
     }
 
-    if (indexPath.section == kOverrideSection) {
-        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kSettingCellID
-                                                                forIndexPath:indexPath];
-        cell.textLabel.text = @"临时调整（按日期）";
-        NSUInteger n = self.timetable.overrides.count;
-        cell.detailTextLabel.text = n > 0 ? [NSString stringWithFormat:@"%lu 天已调整", (unsigned long)n]
-                                          : @"未设置";
-        cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
-        return cell;
-    }
-
     UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kCourseCellID
                                                             forIndexPath:indexPath];
     CALCourse *c = [self courseAtIndexPath:indexPath];
@@ -171,8 +157,7 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
 
 - (nullable NSString *)tableView:(UITableView *)tableView
          titleForHeaderInSection:(NSInteger)section {
-    if (section == kSettingSection)  return @"闹钟设置";
-    if (section == kOverrideSection) return @"临时调整";
+    if (section == kSettingSection) return @"闹钟设置";
     NSInteger weekday = [self weekdayForSection:section];
     if (weekday == 0) return nil;
     NSUInteger count = [self coursesForWeekday:weekday].count;
@@ -182,16 +167,11 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
 
 - (nullable NSString *)tableView:(UITableView *)tableView
          titleForFooterInSection:(NSInteger)section {
-    if (section == kSettingSection) {
-        if (self.timetable.courses.count == 0) {
-            return @"还没有课程。点右上角「+」添加，或回上一页载入示例课表。";
-        }
-        return @"闹钟时间 = 当天第一节课开始时间 − 提前量";
+    if (section != kSettingSection) return nil;
+    if (self.timetable.courses.count == 0) {
+        return @"还没有课程。点右上角「+」添加，或回上一页载入示例课表。";
     }
-    if (section == kOverrideSection) {
-        return @"指定某天覆盖常规课表：临时调课、放假。改动只影响那一天。";
-    }
-    return nil;
+    return @"闹钟时间 = 当天第一节课开始时间 − 提前量";
 }
 
 #pragma mark - 编辑（左滑删除）
@@ -222,11 +202,6 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
 
     if (indexPath.section == kSettingSection) {
         [self promptAdvanceMinutes];
-        return;
-    }
-    if (indexPath.section == kOverrideSection) {
-        CALOverrideViewController *vc = [[CALOverrideViewController alloc] init];
-        [self.navigationController pushViewController:vc animated:YES];
         return;
     }
     CALCourse *c = [self courseAtIndexPath:indexPath];

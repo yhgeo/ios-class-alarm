@@ -32,11 +32,21 @@ static const CGFloat kCorner       = 12.0;
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"课表闹钟";
+    self.title = @"响课";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     [self buildUI];
     [self refreshStatus];
     [self showDiagnostics];
+
+    // 快捷指令通过 xiangke://apply 唤起后，结果从这里回来
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(onApplyFromURL:)
+                                                 name:CALDidApplyNotification
+                                               object:nil];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -63,11 +73,13 @@ static const CGFloat kCorner       = 12.0;
 
     NSArray<NSString *> *titles = @[@"立即应用（设置次日闹钟）",
                                     @"编辑课表",
+                                    @"导入课表（URL）",
                                     @"载入示例课表",
                                     @"存储自检",
                                     @"清理课表闹钟"];
     NSArray<NSString *> *selectors = @[@"onApply", @"onEditTimetable",
-                                       @"onSample", @"onDiagnostics", @"onClear"];
+                                       @"onImport", @"onSample",
+                                       @"onDiagnostics", @"onClear"];
 
     NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
     for (NSUInteger i = 0; i < titles.count; i++) {
@@ -161,6 +173,90 @@ static const CGFloat kCorner       = 12.0;
 
 - (void)onDiagnostics {
     self.logView.text = [CALTimetableStore shared].storageDiagnostics;
+}
+
+#pragma mark - 导入课表
+
+- (void)onImport {
+    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"CALImportURL"];
+
+    UIAlertController *ac =
+        [UIAlertController alertControllerWithTitle:@"导入课表"
+                                            message:@"填入课表 JSON 的 https 地址（GitHub Gist 的 raw 链接即可）"
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [ac addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"https://...";
+        tf.text = saved;
+        tf.keyboardType = UIKeyboardTypeURL;
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    [ac addAction:[UIAlertAction actionWithTitle:@"取消"
+                                           style:UIAlertActionStyleCancel
+                                         handler:nil]];
+
+    __weak typeof(self) weakSelf = self;
+    [ac addAction:[UIAlertAction actionWithTitle:@"导入"
+                                           style:UIAlertActionStyleDefault
+                                         handler:^(UIAlertAction *action) {
+        NSString *text = [ac.textFields.firstObject.text
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        [weakSelf importFromURLString:text];
+    }]];
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
+- (void)importFromURLString:(NSString *)urlString {
+    NSURL *url = urlString.length ? [NSURL URLWithString:urlString] : nil;
+    if (!url) {
+        self.logView.text = @"⚠️ URL 无效。";
+        return;
+    }
+    if (![url.scheme.lowercaseString isEqualToString:@"https"]) {
+        self.logView.text = @"⚠️ 只支持 https —— iOS 默认禁止明文 http 请求。";
+        return;
+    }
+
+    [[NSUserDefaults standardUserDefaults] setObject:urlString forKey:@"CALImportURL"];
+    self.logView.text = [NSString stringWithFormat:@"下载中…\n%@", urlString];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSError *netError = nil;
+        NSData *data = [NSData dataWithContentsOfURL:url options:0 error:&netError];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (data.length == 0) {
+                self.logView.text = [NSString stringWithFormat:@"⚠️ 下载失败：%@",
+                                     netError.localizedDescription ?: @"没有拿到数据"];
+                return;
+            }
+
+            CALTimetableStore *store = [CALTimetableStore shared];
+            NSError *importError = nil;
+            if (![store importFromJSONData:data error:&importError]) {
+                self.logView.text = [NSString stringWithFormat:@"⚠️ 解析或保存失败：%@",
+                                     importError.localizedDescription ?: @"未知错误"];
+                return;
+            }
+
+            CALTimetable *tt = store.timetable;
+            self.logView.text = [NSString stringWithFormat:
+                @"✅ 导入成功：%lu 节课，提前量 %ld 分钟。\n\n%@",
+                (unsigned long)tt.courses.count, (long)tt.advanceMinutes,
+                [store storageDiagnostics]];
+            [self refreshStatus];
+        });
+    });
+}
+
+#pragma mark - URL 唤起
+
+- (void)onApplyFromURL:(NSNotification *)note {
+    NSString *log = note.userInfo[@"log"];
+    if ([log isKindOfClass:[NSString class]] && log.length > 0) {
+        self.logView.text = [NSString stringWithFormat:@"（由 xiangke://apply 触发）\n%@", log];
+    }
+    [self refreshStatus];
 }
 
 - (void)onClear {

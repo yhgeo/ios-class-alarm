@@ -1,6 +1,6 @@
 //
 //  main.m
-//  ClassAlarm — 课表闹钟
+//  响课（XiangKe）— 课表闹钟
 //
 //  入口与 App 生命周期。业务逻辑都在各 CAL* 模块里，这里只做装配。
 //
@@ -13,10 +13,15 @@
 //    CALHomeViewController       主界面
 //    CALTimetableViewController  课表列表页
 //    CALCourseEditorViewController  单节课编辑表单
+//    CALPaddedLabel              带内边距的 UILabel
 //
 
 #import <UIKit/UIKit.h>
 #import "CALHomeViewController.h"
+#import "CALApplier.h"
+
+/// 快捷指令定时自动化用的 URL Scheme：xiangke://apply
+static NSString * const kCALURLScheme = @"xiangke";
 
 #pragma mark - AppDelegate
 
@@ -33,6 +38,35 @@
     UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:home];
     self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
+
+    // 冷启动就是被 URL 唤起的：URL 在 launchOptions 里，不走 openURL:
+    NSURL *launchURL = launchOptions[UIApplicationLaunchOptionsURLKey];
+    if ([launchURL isKindOfClass:[NSURL class]]) {
+        [self handleURL:launchURL];
+    }
+    return YES;
+}
+
+- (BOOL)application:(UIApplication *)application
+            openURL:(NSURL *)url
+            options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options {
+    return [self handleURL:url];
+}
+
+/// 解析 xiangke://apply。返回是否已接管该 URL。
+- (BOOL)handleURL:(NSURL *)url {
+    if (![url.scheme.lowercaseString isEqualToString:kCALURLScheme]) return NO;
+
+    NSString *action = url.host.lowercaseString ?: @"";
+    if (action.length == 0) {
+        // 兼容 xiangke:///apply 这种写法
+        action = [[url.path stringByTrimmingCharactersInSet:
+                   [NSCharacterSet characterSetWithCharactersInString:@"/"]] lowercaseString];
+    }
+
+    if ([action isEqualToString:@"apply"]) {
+        [CALApplier applyTimetableFromURLTrigger];
+    }
     return YES;
 }
 

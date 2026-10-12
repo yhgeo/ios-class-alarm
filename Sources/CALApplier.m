@@ -34,6 +34,8 @@ static NSDate *CALTomorrow(void) {
 
 #pragma mark - CALApplier
 
+NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
+
 @implementation CALApplier
 
 + (NSString *)applyTimetable:(CALTimetable *)timetable {
@@ -108,6 +110,20 @@ static NSDate *CALTomorrow(void) {
     }
     [s appendFormat:@"\n系统内已有课表闹钟：%ld 个", (long)managed];
     return s;
+}
+
++ (void)applyTimetableFromURLTrigger {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        CALTimetable *tt = [CALTimetableStore shared].timetable;
+        NSString *log = [CALApplier applyTimetable:tt];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[NSNotificationCenter defaultCenter]
+                postNotificationName:CALDidApplyNotification
+                              object:nil
+                            userInfo:@{@"log": log ?: @""}];
+        });
+    });
 }
 
 @end

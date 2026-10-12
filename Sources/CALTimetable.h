@@ -25,9 +25,6 @@ NS_ASSUME_NONNULL_BEGIN
 + (nullable instancetype)courseFromDictionary:(NSDictionary *)dict;
 - (NSDictionary *)dictionaryValue;
 
-/// 复制一份等值的新对象（改副本不会影响原课表）
-- (CALCourse *)duplicate;
-
 /// "08:00" → 从零点起的分钟数；解析失败返回 NSNotFound
 - (NSInteger)startMinutesFromMidnight;
 

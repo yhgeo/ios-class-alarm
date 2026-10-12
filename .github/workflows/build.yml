@@ -1,4 +1,4 @@
-name: Build PoC IPA
+name: Build XiangKe IPA
 
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
           set -euo pipefail
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           echo "iOS SDK: $SDK"
-          APP="out/Payload/AlarmPoC.app"
+          APP="out/Payload/XiangKe.app"
           mkdir -p "$APP"
           SOURCES=$(find Sources -name '*.m' -print | sort | tr '\n' ' ')
           echo "源文件: $SOURCES"
@@ -39,29 +39,30 @@ jobs:
             -framework Foundation \
             -framework CoreGraphics \
             -framework Security \
-            -o "$APP/AlarmPoC" \
+            -o "$APP/XiangKe" \
             $SOURCES
           cp Sources/Info.plist "$APP/Info.plist"
+          cp Resources/AppIcon*.png "$APP/"
           printf 'APPL????' > "$APP/PkgInfo"
           echo "--- app bundle ---"
           ls -la "$APP"
-          file "$APP/AlarmPoC"
+          file "$APP/XiangKe"
 
       - name: Inject entitlements and package IPA
         run: |
           set -euo pipefail
-          APP="out/Payload/AlarmPoC.app"
-          ldid -Sentitlements.plist "$APP/AlarmPoC"
+          APP="out/Payload/XiangKe.app"
+          ldid -Sentitlements.plist "$APP/XiangKe"
           echo "----- applied entitlements -----"
-          ldid -e "$APP/AlarmPoC"
-          rm -f out/AlarmPoC.ipa
+          ldid -e "$APP/XiangKe"
+          rm -f out/XiangKe.ipa
           cd out
-          zip -qry AlarmPoC.ipa Payload
-          ls -lh AlarmPoC.ipa
+          zip -qry XiangKe.ipa Payload
+          ls -lh XiangKe.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: AlarmPoC-ipa
-          path: out/AlarmPoC.ipa
+          name: XiangKe-ipa
+          path: out/XiangKe.ipa
           retention-days: 30

@@ -1,4 +1,4 @@
-# 课表闹钟（ClassAlarm）
+# 响课（XiangKe）
 
 用课表自动设置次日早晨的闹钟。目标设备：iPhone 13 / iOS 16.6.1 / TrollStore。
 
@@ -15,9 +15,10 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 | 模块化 App 骨架 | ✅ 已完成 |
 | 载入示例课表 + 一键应用 | ✅ 已完成 |
 | 课表编辑界面（增 / 删 / 改 / 提前量） | ✅ 已完成 |
-| 临时调整（按日期覆盖：调课 / 放假） | ✅ 已完成 |
-| 远程 JSON 导入（GitHub Gist） | ⬜ 待做 |
-| 快捷指令动作（App Intent） | ⬜ 待做 |
+| 课表持久化（重启不丢） | ✅ 已完成 |
+| 远程 JSON 导入（URL） | ✅ 已完成 |
+| 快捷指令唤起（URL Scheme） | ✅ 已完成 |
+| 应用名 / 图标 | ✅ 已完成 |
 
 ## 模块结构
 
@@ -31,12 +32,11 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 | `CALDaemonReloader.h/.m` | 让 mobiletimerd 重新加载数据（换方案只改这里） |
 | `CALScheduleEngine.h/.m` | 纯计算：课表 → 目标时间（无副作用） |
 | `CALApplier.h/.m` | 协调层，唯一知道完整流程的模块 |
-| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 示例 / 自检 / 清理 |
-| `CALTimetableViewController.h/.m` | 课表列表：按星期分组，增删改 + 提前量 + 临时调整入口 |
+| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 导入 / 示例 / 自检 / 清理 |
+| `CALTimetableViewController.h/.m` | 课表列表：按星期分组，增删改 + 提前量 |
 | `CALCourseEditorViewController.h/.m` | 单节课编辑表单（只收集输入并回调） |
-| `CALOverrideViewController.h/.m` | 临时调整：按日期覆盖课表（调课 / 放假） |
 | `CALPaddedLabel.h/.m` | 带内边距的 UILabel（通用小组件） |
-| `main.m` | 入口与装配（导航栈） |
+| `main.m` | 入口与装配（导航栈 + URL Scheme 处理） |
 
 ## 课表数据格式
 
@@ -59,7 +59,8 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 
 - `weekday`：1=周一 … 7=周日
 - `advanceMinutes`：闹钟 = 第一节课开始时间 − 该值
-- `overrides`：指定日期覆盖常规课表；**空数组表示当天无课**（优先级最高，用于临时调课/放假）
+- `overrides`：指定日期覆盖常规课表（**空数组 = 当天无课**）。
+  模型层保留该字段以便兼容旧数据，**当前版本没有编辑入口**，留空即可。
 
 ## 工作原理
 
@@ -78,11 +79,13 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 SOURCES=$(find Sources -name '*.m')
 xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK \
     -miphoneos-version-min=16.0 -fobjc-arc -ISources \
-    -framework UIKit -framework Foundation -framework Security \
-    -o AlarmPoC.app/AlarmPoC $SOURCES
+    -framework UIKit -framework Foundation -framework CoreGraphics -framework Security \
+    -o XiangKe.app/XiangKe $SOURCES
 
-ldid -Sentitlements.plist AlarmPoC.app/AlarmPoC
-zip -r AlarmPoC.ipa Payload
+cp Sources/Info.plist XiangKe.app/Info.plist
+cp Resources/AppIcon*.png XiangKe.app/
+ldid -Sentitlements.plist XiangKe.app/XiangKe
+zip -r XiangKe.ipa Payload
 ```
 
 ## 踩坑记录
@@ -103,14 +106,29 @@ zip -r AlarmPoC.ipa Payload
 
 ## 使用
 
-1. 打开 Actions 页面，等 `Build PoC IPA` 跑完，下载产物 `AlarmPoC-ipa`
-2. 用 TrollStore 安装
+1. 打开 Actions 页面，等 `Build XiangKe IPA` 跑完，下载产物 `XiangKe-ipa`
+2. 用 TrollStore 安装，桌面显示为「响课」
 3. 打开 App → 点「编辑课表」录入课程（右上角 `+` 新增，左滑删除，点行编辑；
    顶部「提前提醒」可改提前量），也可先点「载入示例课表」体验
-4. 遇到临时调课 / 放假：课表页 →「临时调整（按日期）」→ 选日期 → 改当天课程，
-   或直接「设为停课」；「恢复常规课表」可撤销该天的调整
+4. 课表想批量更新：主页「导入课表（URL）」填入课表 JSON 的 https 地址（如 GitHub Gist 的 raw 链接）
 5. 回主页点「立即应用（设置次日闹钟）」
 6. 打开系统「时钟」App 核对
+
+## 配合快捷指令做无人值守
+
+App 注册了 URL Scheme `xiangke://apply`，被打开时会**自动执行一次「应用课表」**。
+
+在「快捷指令」App 里：
+
+1. 新建一个快捷指令，只放一个动作：**打开 URL** → 填 `xiangke://apply`
+2. 切到「自动化」→ 新建个人自动化 → **特定时间**（例如每天 22:00）→ 选「每天」
+3. 动作选刚才那个快捷指令；**关掉「运行前询问」**（iOS 16 上还会额外要求关掉「运行时通知」才能静默）
+
+这样每天到点自动唤起响课、算好次日第一节课、写好系统闹钟，全程不用手动点。
+
+> 为什么不用 App Intent：`AppIntents` 框架是 Swift-first，本项目的构建链是纯 clang 编译 ObjC
+> （Windows 上没有 Xcode，见「构建」一节），引入 Swift 混编的代价远大于收益。
+> URL Scheme 同样能被快捷指令的定时自动化驱动，且实现简单、可控。
 
 ## 数据存在哪
 
