@@ -42,8 +42,8 @@ static NSDate *CALDateFromTimeString(NSString *string) {
 @property (nonatomic, strong) UIDatePicker *startPicker;
 @property (nonatomic, strong) UIDatePicker *endPicker;
 @property (nonatomic, strong) UITextField *nameField;
-/// 四个字段标题，顺序：星期 / 开始时间 / 结束时间 / 课程名
-@property (nonatomic, strong) NSArray<UILabel *> *fieldLabels;
+/// 每一行是 @[标题 UILabel, 输入控件]，顺序即显示顺序
+@property (nonatomic, strong) NSMutableArray<NSArray *> *rows;
 @end
 
 @implementation CALCourseEditorViewController
@@ -67,29 +67,16 @@ static NSDate *CALDateFromTimeString(NSString *string) {
 #pragma mark - UI
 
 - (void)buildUI {
-    NSArray<NSString *> *titles = @[@"星期", @"开始时间", @"结束时间", @"课程名"];
-    NSMutableArray<UILabel *> *labels = [NSMutableArray array];
-    for (NSString *t in titles) {
-        UILabel *l = [[UILabel alloc] init];
-        l.text = t;
-        l.font = [UIFont systemFontOfSize:14];
-        l.textColor = [UIColor secondaryLabelColor];
-        [self.view addSubview:l];
-        [labels addObject:l];
-    }
-    self.fieldLabels = labels;
+    self.rows = [NSMutableArray array];
 
     // 星期
     self.weekdayControl = [[UISegmentedControl alloc]
         initWithItems:@[@"一", @"二", @"三", @"四", @"五", @"六", @"日"]];
     self.weekdayControl.selectedSegmentIndex = 0;
-    [self.view addSubview:self.weekdayControl];
 
     // 起止时间
     self.startPicker = [self makeTimePicker];
     self.endPicker   = [self makeTimePicker];
-    [self.view addSubview:self.startPicker];
-    [self.view addSubview:self.endPicker];
 
     // 课程名
     self.nameField = [[UITextField alloc] init];
@@ -98,7 +85,13 @@ static NSDate *CALDateFromTimeString(NSString *string) {
     self.nameField.clearButtonMode = UITextFieldViewModeWhileEditing;
     self.nameField.returnKeyType = UIReturnKeyDone;
     self.nameField.delegate = self;
-    [self.view addSubview:self.nameField];
+
+    if (!self.hidesWeekdayField) {
+        [self addRowWithTitle:@"星期" control:self.weekdayControl];
+    }
+    [self addRowWithTitle:@"开始时间" control:self.startPicker];
+    [self addRowWithTitle:@"结束时间" control:self.endPicker];
+    [self addRowWithTitle:@"课程名" control:self.nameField];
 
     // 导航栏按钮
     self.navigationItem.leftBarButtonItem =
@@ -109,6 +102,17 @@ static NSDate *CALDateFromTimeString(NSString *string) {
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemSave
                                                       target:self
                                                       action:@selector(onSave)];
+}
+
+/// 加一行「标题 + 控件」，统一字体与颜色
+- (void)addRowWithTitle:(NSString *)title control:(UIView *)control {
+    UILabel *label = [[UILabel alloc] init];
+    label.text = title;
+    label.font = [UIFont systemFontOfSize:14];
+    label.textColor = [UIColor secondaryLabelColor];
+    [self.view addSubview:label];
+    [self.view addSubview:control];
+    [self.rows addObject:@[label, control]];
 }
 
 - (UIDatePicker *)makeTimePicker {
@@ -122,7 +126,7 @@ static NSDate *CALDateFromTimeString(NSString *string) {
     return p;
 }
 
-/// 按 safeArea 从上往下排，四组字段左右对齐、间距一致
+/// 按 safeArea 从上往下排，各行左右对齐、间距一致
 - (void)layoutForm {
     UIEdgeInsets inset = self.view.safeAreaInsets;
     CGFloat w  = self.view.bounds.size.width;
@@ -130,12 +134,13 @@ static NSDate *CALDateFromTimeString(NSString *string) {
     CGFloat cw = w - kMargin * 2;
     CGFloat y  = inset.top + 20;
 
-    NSArray<UIView *> *controls = @[self.weekdayControl, self.startPicker,
-                                    self.endPicker, self.nameField];
-    for (NSUInteger i = 0; i < controls.count; i++) {
-        self.fieldLabels[i].frame = CGRectMake(x, y, cw, kLabelH);
+    for (NSArray *row in self.rows) {
+        UILabel *label   = row[0];
+        UIView  *control = row[1];
+
+        label.frame = CGRectMake(x, y, cw, kLabelH);
         y += kLabelH + kLabelGap;
-        controls[i].frame = CGRectMake(x, y, cw, kControlH);
+        control.frame = CGRectMake(x, y, cw, kControlH);
         y += kControlH + kGroupGap;
     }
 }

@@ -61,6 +61,13 @@ static NSInteger CALProjectWeekday(NSDate *date) {
     };
 }
 
+- (CALCourse *)duplicate {
+    return [CALCourse courseWithWeekday:self.weekday
+                                  start:self.start
+                                    end:self.end
+                                   name:self.name];
+}
+
 - (NSInteger)startMinutesFromMidnight {
     NSArray<NSString *> *parts = [self.start componentsSeparatedByString:@":"];
     if (parts.count < 2) return NSNotFound;

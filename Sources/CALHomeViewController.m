@@ -9,6 +9,7 @@
 #import "CALAlarmStore.h"
 #import "CALTimetable.h"
 #import "CALTimetableViewController.h"
+#import "CALPaddedLabel.h"
 
 #pragma mark - 布局常量
 
@@ -16,40 +17,6 @@ static const CGFloat kMargin       = 16.0;
 static const CGFloat kButtonHeight = 48.0;
 static const CGFloat kButtonGap    = 12.0;
 static const CGFloat kCorner       = 12.0;
-
-#pragma mark - 带内边距的 UILabel
-
-/// UILabel 本身没有内边距，文字会贴着圆角边缘。这里补上。
-@interface CALPaddedLabel : UILabel
-@property (nonatomic) UIEdgeInsets padding;
-@end
-
-@implementation CALPaddedLabel
-
-- (CGRect)cal_insetRect:(CGRect)rect {
-    UIEdgeInsets p = self.padding;
-    return CGRectMake(rect.origin.x + p.left,
-                      rect.origin.y + p.top,
-                      MAX(0.0, rect.size.width - p.left - p.right),
-                      MAX(0.0, rect.size.height - p.top - p.bottom));
-}
-
-- (void)drawTextInRect:(CGRect)rect {
-    [super drawTextInRect:[self cal_insetRect:rect]];
-}
-
-- (CGRect)textRectForBounds:(CGRect)bounds limitedToNumberOfLines:(NSInteger)numberOfLines {
-    CGRect r = [super textRectForBounds:[self cal_insetRect:bounds]
-                 limitedToNumberOfLines:numberOfLines];
-    UIEdgeInsets p = self.padding;
-    r.origin.x    -= p.left;
-    r.origin.y    -= p.top;
-    r.size.width  += p.left + p.right;
-    r.size.height += p.top + p.bottom;
-    return r;
-}
-
-@end
 
 #pragma mark - Home
 
