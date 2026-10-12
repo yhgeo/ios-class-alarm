@@ -9,6 +9,7 @@
 #import "CALAlarmStore.h"
 #import "CALTimetable.h"
 #import "CALTimetableViewController.h"
+#import "CALImportViewController.h"
 #import "CALPaddedLabel.h"
 
 #pragma mark - 布局常量
@@ -20,7 +21,7 @@ static const CGFloat kCorner       = 12.0;
 
 #pragma mark - Home
 
-@interface CALHomeViewController ()
+@interface CALHomeViewController () <CALImportDelegate>
 @property (nonatomic, strong) CALPaddedLabel *statusLabel;
 @property (nonatomic, strong) UITextView *logView;
 @property (nonatomic, strong) NSArray<UIButton *> *buttons;
@@ -178,32 +179,25 @@ static const CGFloat kCorner       = 12.0;
 #pragma mark - 导入课表
 
 - (void)onImport {
-    NSString *saved = [[NSUserDefaults standardUserDefaults] stringForKey:@"CALImportURL"];
+    CALImportViewController *vc = [[CALImportViewController alloc] init];
+    vc.delegate = self;
+    vc.initialURLString = [[NSUserDefaults standardUserDefaults] stringForKey:@"CALImportURL"];
 
-    UIAlertController *ac =
-        [UIAlertController alertControllerWithTitle:@"导入课表"
-                                            message:@"填入课表 JSON 的 https 地址（GitHub Gist 的 raw 链接即可）"
-                                     preferredStyle:UIAlertControllerStyleAlert];
-    [ac addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"https://...";
-        tf.text = saved;
-        tf.keyboardType = UIKeyboardTypeURL;
-        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
-        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self presentViewController:nav animated:YES completion:nil];
+}
+
+#pragma mark - CALImportDelegate
+
+- (void)importController:(CALImportViewController *)controller
+    didFinishWithURLString:(NSString *)urlString {
+    [self dismissViewControllerAnimated:YES completion:^{
+        [self importFromURLString:urlString];
     }];
-    [ac addAction:[UIAlertAction actionWithTitle:@"取消"
-                                           style:UIAlertActionStyleCancel
-                                         handler:nil]];
+}
 
-    __weak typeof(self) weakSelf = self;
-    [ac addAction:[UIAlertAction actionWithTitle:@"导入"
-                                           style:UIAlertActionStyleDefault
-                                         handler:^(UIAlertAction *action) {
-        NSString *text = [ac.textFields.firstObject.text
-            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        [weakSelf importFromURLString:text];
-    }]];
-    [self presentViewController:ac animated:YES completion:nil];
+- (void)importControllerDidCancel:(CALImportViewController *)controller {
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 - (void)importFromURLString:(NSString *)urlString {
@@ -231,11 +225,28 @@ static const CGFloat kCorner       = 12.0;
                 return;
             }
 
+            // 常见的坑：填的是网页地址，下载回来是一坨 HTML
+            NSUInteger probeLen = MIN((NSUInteger)128, data.length);
+            NSString *head = [[NSString alloc]
+                initWithData:[data subdataWithRange:NSMakeRange(0, probeLen)]
+                    encoding:NSUTF8StringEncoding];
+            if (head.length > 0 &&
+                ([head containsString:@"<!DOCTYPE"] || [head containsString:@"<!doctype"] ||
+                 [head containsString:@"<html"]      || [head containsString:@"<HTML"])) {
+                self.logView.text =
+                    @"⚠️ 下载到的不是 JSON，而是一个网页。\n\n"
+                     "多半是地址填成了网页地址，请改用 raw 地址：\n"
+                     "· GitHub Gist：点右上角 Raw 后复制地址栏（填 gist 页面地址会自动补 /raw）\n"
+                     "· GitHub 仓库：用 raw.githubusercontent.com 开头的地址";
+                return;
+            }
+
             CALTimetableStore *store = [CALTimetableStore shared];
             NSError *importError = nil;
             if (![store importFromJSONData:data error:&importError]) {
-                self.logView.text = [NSString stringWithFormat:@"⚠️ 解析或保存失败：%@",
-                                     importError.localizedDescription ?: @"未知错误"];
+                self.logView.text = [NSString stringWithFormat:
+                    @"⚠️ 解析或保存失败：%@\n\n请检查 JSON 格式（字段说明见 README）。",
+                    importError.localizedDescription ?: @"未知错误"];
                 return;
             }
 
