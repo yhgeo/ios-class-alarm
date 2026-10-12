@@ -126,7 +126,8 @@ static void PostNotifications(NSMutableString *log) {
     };
     for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
         uint32_t st = notify_post(names[i]);
-        [log appendFormat:@"    notify_post(\"%s\") → %u\n", names[i], st];
+        NSString *s = [NSString stringWithFormat:@"    notify_post %s -> %u\n", names[i], st];
+        [log appendString:s];
     }
 }
 
@@ -152,7 +153,9 @@ static pid_t FindTimerDaemon(NSMutableString *log) {
         }
         if (procs) free(procs);
     } else {
-        [log appendFormat:@"    [sysctl] 失败: %s\n", strerror(errno)];
+        int e = errno;
+        NSString *s = [NSString stringWithFormat:@"    [sysctl] 失败，errno = %d\n", e];
+        [log appendString:s];
     }
 
     if (target < 0) {
@@ -179,10 +182,13 @@ static void RestartTimerDaemon(NSMutableString *log) {
         return;
     }
     // 用 SIGKILL：避免它在退出时把内存状态写回、覆盖我们刚写入的数据
-    if (kill(pid, SIGKILL) == 0) {
+    int rc = kill(pid, SIGKILL);
+    int errCode = errno;
+    if (rc == 0) {
         [log appendString:@"    已发送 SIGKILL，launchd 将自动重新拉起\n"];
     } else {
-        [log appendFormat:@"    kill 失败: %s (errno=%d)\n", strerror(errno), errno);
+        NSString *s = [NSString stringWithFormat:@"    kill 失败，errno = %d\n", errCode];
+        [log appendString:s];
     }
 }
 
