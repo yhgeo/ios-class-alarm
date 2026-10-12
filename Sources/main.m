@@ -5,12 +5,14 @@
 //  入口与 App 生命周期。业务逻辑都在各 CAL* 模块里，这里只做装配。
 //
 //  模块划分：
-//    CALTimetable           课表数据模型 + 持久化
-//    CALAlarmStore          系统闹钟读写引擎
-//    CALDaemonReloader      让 mobiletimerd 重新加载数据
-//    CALScheduleEngine      纯计算：课表 → 目标时间
-//    CALApplier             协调层：把上面几块串起来
-//    CALHomeViewController  界面
+//    CALTimetable                课表数据模型 + 持久化
+//    CALAlarmStore               系统闹钟读写引擎
+//    CALDaemonReloader           让 mobiletimerd 重新加载数据
+//    CALScheduleEngine           纯计算：课表 → 目标时间
+//    CALApplier                  协调层：把上面几块串起来
+//    CALHomeViewController       主界面
+//    CALTimetableViewController  课表列表页
+//    CALCourseEditorViewController  单节课编辑表单
 //
 
 #import <UIKit/UIKit.h>
@@ -27,7 +29,9 @@
 - (BOOL)application:(UIApplication *)application
         didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    self.window.rootViewController = [[CALHomeViewController alloc] init];
+    CALHomeViewController *home = [[CALHomeViewController alloc] init];
+    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:home];
+    self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
     return YES;
 }

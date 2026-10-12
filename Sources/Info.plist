@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
 	<key>CFBundleDisplayName</key>
-	<string>闹钟PoC</string>
+	<string>课表闹钟</string>
 	<key>CFBundleExecutable</key>
 	<string>AlarmPoC</string>
 	<key>CFBundleIdentifier</key>
