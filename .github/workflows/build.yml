@@ -12,36 +12,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install xcodegen and ldid
-        run: brew install xcodegen ldid
+      - name: Install ldid
+        run: brew install ldid
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      - name: Build app
+      - name: Compile with clang
         run: |
-          xcodebuild \
-            -project AlarmPoC.xcodeproj \
-            -scheme AlarmPoC \
-            -sdk iphoneos \
-            -configuration Release \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            build
+          set -euo pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          echo "iOS SDK: $SDK"
+          APP="out/Payload/AlarmPoC.app"
+          mkdir -p "$APP"
+          xcrun --sdk iphoneos clang \
+            -arch arm64 \
+            -isysroot "$SDK" \
+            -miphoneos-version-min=16.0 \
+            -fobjc-arc \
+            -O1 \
+            -framework UIKit \
+            -framework Foundation \
+            -o "$APP/AlarmPoC" \
+            Sources/main.m
+          cp Sources/Info.plist "$APP/Info.plist"
+          printf 'APPL????' > "$APP/PkgInfo"
+          echo "--- app bundle ---"
+          ls -la "$APP"
+          file "$APP/AlarmPoC"
 
       - name: Inject entitlements and package IPA
         run: |
-          APP="build/Build/Products/Release-iphoneos/AlarmPoC.app"
-          ls -la "$APP"
+          set -euo pipefail
+          APP="out/Payload/AlarmPoC.app"
           ldid -Sentitlements.plist "$APP/AlarmPoC"
-          ldid -e "$APP/AlarmPoC" > applied-entitlements.plist
           echo "----- applied entitlements -----"
-          cat applied-entitlements.plist
-          rm -rf Payload AlarmPoC.ipa
-          mkdir -p Payload
-          cp -r "$APP" Payload/
+          ldid -e "$APP/AlarmPoC"
+          rm -f out/AlarmPoC.ipa
+          cd out
           zip -qry AlarmPoC.ipa Payload
           ls -lh AlarmPoC.ipa
 
@@ -49,5 +54,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: AlarmPoC-ipa
-          path: AlarmPoC.ipa
+          path: out/AlarmPoC.ipa
           retention-days: 30

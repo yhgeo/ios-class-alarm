@@ -54,13 +54,18 @@
 
 ## 构建方式
 
-本机是 Windows，没有 Xcode，所以编译走 GitHub Actions 的 macOS runner：
+本机是 Windows，没有 Xcode，所以编译走 GitHub Actions 的 macOS runner。
+直接用 clang 编译再手工组装 `.app`，不依赖 xcodegen / xcodebuild，
+避免工程格式与 runner 上的 Xcode 版本不匹配：
 
 ```
-xcodegen generate      # 由 project.yml 生成 Xcode 工程
-xcodebuild -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO
+xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK \
+    -miphoneos-version-min=16.0 -fobjc-arc \
+    -framework UIKit -framework Foundation \
+    -o AlarmPoC.app/AlarmPoC Sources/main.m
+
 ldid -Sentitlements.plist AlarmPoC.app/AlarmPoC   # 注入私有权限
-zip → AlarmPoC.ipa
+zip -r AlarmPoC.ipa Payload                       # Payload/AlarmPoC.app
 ```
 
 `entitlements.plist` 中注入了 `platform-application`、`com.apple.private.security.no-sandbox`
