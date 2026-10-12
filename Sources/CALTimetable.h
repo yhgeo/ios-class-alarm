@@ -64,10 +64,21 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)shared;
 
 - (void)reload;
-- (void)save;
 
-/// 数据文件位置（App 沙箱内）
+/// 落盘。返回是否成功 —— 内部含「写后回读校验」，不只看 writeToFile 的返回值。
+- (BOOL)save;
+
+/// 数据文件位置
 - (NSString *)storagePath;
+
+/// 存储自检摘要（路径 / 可写性 / 文件大小 / 上次保存结果），供界面显示
+- (NSString *)storageDiagnostics;
+
+/// 最近一次保存是否成功
+@property (nonatomic, readonly) BOOL lastSaveOK;
+
+/// 最近一次保存的失败原因；成功时为 nil
+@property (nonatomic, readonly, copy, nullable) NSString *lastSaveError;
 
 /// 用远程 JSON 覆盖本地课表；失败返回 NO 并填充 error
 - (BOOL)importFromJSONData:(NSData *)data error:(NSError **)error;

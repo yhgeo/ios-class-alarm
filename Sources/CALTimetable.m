@@ -174,9 +174,93 @@ static NSInteger CALProjectWeekday(NSDate *date) {
 
 @end
 
+#pragma mark - 存储位置解析
+
+static NSString * const kCALStorageFileName = @"class-alarm-timetable.json";
+
+/// 候选目录，按优先级排列
+static NSArray<NSString *> *CALStorageCandidateDirectories(void) {
+    NSMutableArray<NSString *> *list = [NSMutableArray array];
+
+    // 1) 系统给的 Documents：沙箱内 → 容器/Documents；no-sandbox → /var/mobile/Documents
+    NSArray<NSString *> *docs =
+        NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+    if (docs.firstObject.length) [list addObject:docs.firstObject];
+
+    // 2) 实测可写（闹钟 plist 就落在这里，已验证过）
+    [list addObject:@"/var/mobile/Library/Preferences"];
+
+    // 3) mobile 主目录
+    [list addObject:@"/var/mobile/Documents"];
+
+    // 4) 临时目录兜底：重启会丢，但至少 App 能跑
+    NSString *tmp = NSTemporaryDirectory();
+    if (tmp.length) [list addObject:tmp];
+
+    return list;
+}
+
+/// 真写一个探针文件再读回来，确认目录确实可用（只看 fileExists 不够）
+static BOOL CALDirectoryIsWritable(NSString *dir) {
+    if (dir.length == 0) return NO;
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:dir]) {
+        if (![fm createDirectoryAtPath:dir
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:nil]) {
+            return NO;
+        }
+    }
+
+    NSString *probe = [dir stringByAppendingPathComponent:@".cal-write-probe"];
+    NSData *payload = [@"ok" dataUsingEncoding:NSUTF8StringEncoding];
+    if (![payload writeToFile:probe atomically:YES]) return NO;
+
+    NSData *back = [NSData dataWithContentsOfFile:probe];
+    [fm removeItemAtPath:probe error:nil];
+    return back.length == payload.length;
+}
+
+/// 解析真正使用的存储目录（进程内只算一次）
+static NSString *CALStorageDirectory(void) {
+    static NSString *dir = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        // 1) 已有数据文件的目录优先 —— 免得换了路径读不到旧课表
+        for (NSString *c in CALStorageCandidateDirectories()) {
+            NSString *f = [c stringByAppendingPathComponent:kCALStorageFileName];
+            if ([fm fileExistsAtPath:f]) {
+                dir = c;
+                break;
+            }
+        }
+
+        // 2) 否则挑第一个真正可写的
+        if (!dir) {
+            for (NSString *c in CALStorageCandidateDirectories()) {
+                if (CALDirectoryIsWritable(c)) {
+                    dir = c;
+                    break;
+                }
+            }
+        }
+
+        // 3) 兜底
+        if (!dir) dir = NSTemporaryDirectory();
+    });
+    return dir;
+}
+
 #pragma mark - CALTimetableStore
 
 @implementation CALTimetableStore
+
+@synthesize lastSaveOK = _lastSaveOK;
+@synthesize lastSaveError = _lastSaveError;
 
 + (instancetype)shared {
     static CALTimetableStore *inst = nil;
@@ -189,38 +273,83 @@ static NSInteger CALProjectWeekday(NSDate *date) {
 }
 
 - (NSString *)storagePath {
-    // 注意：no-sandbox 下 NSHomeDirectory() 返回 /var/mobile，
-    // 所以优先用系统给出的沙箱路径，拿不到再退回固定目录。
-    NSArray<NSString *> *docs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-                                                                    NSUserDomainMask, YES);
-    NSString *dir = docs.firstObject;
-    if (dir.length == 0) dir = @"/var/mobile/Documents";
-    return [dir stringByAppendingPathComponent:@"class-alarm-timetable.json"];
+    return [CALStorageDirectory() stringByAppendingPathComponent:kCALStorageFileName];
 }
 
 - (void)reload {
     CALTimetable *tt = nil;
-    NSData *data = [NSData dataWithContentsOfFile:[self storagePath]];
+    NSString *path = [self storagePath];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+
     if (data.length > 0) {
-        id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        NSError *jsonError = nil;
+        id obj = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonError];
         if ([obj isKindOfClass:[NSDictionary class]]) {
             tt = [CALTimetable timetableFromDictionary:obj];
+        } else {
+            NSLog(@"[CALTimetableStore] 课表 JSON 解析失败：%@",
+                  jsonError.localizedDescription ?: @"顶层不是对象");
         }
     }
+
     _timetable = tt ?: [CALTimetable defaultTimetable];
 }
 
-- (void)save {
+- (BOOL)save {
+    NSError *jsonError = nil;
     NSData *data = [NSJSONSerialization dataWithJSONObject:[self.timetable dictionaryValue]
                                                    options:NSJSONWritingPrettyPrinted
-                                                     error:nil];
-    if (!data) return;
+                                                     error:&jsonError];
+    if (!data) {
+        _lastSaveOK = NO;
+        _lastSaveError = [jsonError.localizedDescription copy] ?: @"JSON 序列化失败";
+        return NO;
+    }
+
     NSString *path = [self storagePath];
-    [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
+    NSString *dir = [path stringByDeletingLastPathComponent];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:nil];
-    [data writeToFile:path atomically:YES];
+
+    NSError *writeError = nil;
+    BOOL ok = [data writeToFile:path options:NSDataWritingAtomic error:&writeError];
+
+    if (ok) {
+        // 回读校验：有些路径会「假装」写入成功
+        NSData *back = [NSData dataWithContentsOfFile:path];
+        ok = (back.length == data.length);
+        if (!ok) _lastSaveError = @"写入后回读校验失败（长度不一致）";
+    } else {
+        _lastSaveError = [writeError.localizedDescription copy] ?: @"写入失败";
+    }
+
+    _lastSaveOK = ok;
+    if (ok) _lastSaveError = nil;
+    return ok;
+}
+
+- (NSString *)storageDiagnostics {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *path = [self storagePath];
+    NSString *dir = [path stringByDeletingLastPathComponent];
+
+    NSMutableString *s = [NSMutableString string];
+    [s appendFormat:@"目录：%@\n", dir];
+    [s appendFormat:@"可写：%@\n", CALDirectoryIsWritable(dir) ? @"是" : @"否"];
+
+    if ([fm fileExistsAtPath:path]) {
+        NSDictionary *attr = [fm attributesOfItemAtPath:path error:nil];
+        [s appendFormat:@"文件：%@（%llu 字节）\n", kCALStorageFileName,
+                         [attr[NSFileSize] unsignedLongLongValue]];
+    } else {
+        [s appendString:@"文件：不存在\n"];
+    }
+
+    [s appendFormat:@"最近保存：%@", _lastSaveOK ? @"成功" : @"未成功"];
+    if (_lastSaveError.length) [s appendFormat:@"（%@）", _lastSaveError];
+    return s;
 }
 
 - (BOOL)importFromJSONData:(NSData *)data error:(NSError **)error {
@@ -235,8 +364,7 @@ static NSInteger CALProjectWeekday(NSDate *date) {
     CALTimetable *tt = [CALTimetable timetableFromDictionary:obj];
     if (!tt) return NO;
     _timetable = tt;
-    [self save];
-    return YES;
+    return [self save];
 }
 
 @end

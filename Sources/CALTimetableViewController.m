@@ -75,6 +75,21 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
     [self.tableView reloadData];
 }
 
+/// 落盘；失败时把原因摊开给用户看，不静默吞掉
+- (void)saveAndReport {
+    CALTimetableStore *store = [CALTimetableStore shared];
+    if ([store save]) return;
+
+    UIAlertController *ac =
+        [UIAlertController alertControllerWithTitle:@"保存失败"
+                                            message:[store storageDiagnostics]
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"好"
+                                           style:UIAlertActionStyleDefault
+                                         handler:nil]];
+    [self presentViewController:ac animated:YES completion:nil];
+}
+
 /// 某个星期下的课程，按开始时间升序
 - (NSArray<CALCourse *> *)coursesForWeekday:(NSInteger)weekday {
     NSMutableArray<CALCourse *> *arr = [NSMutableArray array];
@@ -171,7 +186,7 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
     NSMutableArray<CALCourse *> *list = [self.timetable.courses mutableCopy];
     [list removeObjectIdenticalTo:target];
     self.timetable.courses = list;
-    [[CALTimetableStore shared] save];
+    [self saveAndReport];
     [self reloadData];
 }
 
@@ -241,7 +256,7 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
         if (v <= 0) v = 30;
         if (v > 600) v = 600;
         weakSelf.timetable.advanceMinutes = v;
-        [[CALTimetableStore shared] save];
+        [weakSelf saveAndReport];
         [weakSelf reloadData];
     }]];
     [self presentViewController:ac animated:YES completion:nil];
@@ -256,13 +271,12 @@ static NSArray<NSString *> *CALWeekdayNames(void) {
     if (editor.editingCourse) {
         // 编辑页是就地修改原对象（见 CALCourseEditorViewController.onSave），
         // 这里只需要把改动落盘。
-        [store save];
     } else {
         NSMutableArray<CALCourse *> *list = [store.timetable.courses mutableCopy];
         [list addObject:course];
         store.timetable.courses = list;
-        [store save];
     }
+    [self saveAndReport];
 
     [self.navigationController popViewControllerAnimated:YES];
     [self reloadData];
