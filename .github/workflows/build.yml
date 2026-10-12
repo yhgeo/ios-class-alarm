@@ -40,6 +40,7 @@ jobs:
             -framework Foundation \
             -framework CoreGraphics \
             -framework UniformTypeIdentifiers \
+            -framework BackgroundTasks \
             -framework Security \
             -o "$APP/XiangKe" \
             $SOURCES

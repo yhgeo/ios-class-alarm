@@ -4,24 +4,28 @@
 //
 //  入口与 App 生命周期。业务逻辑都在各 CAL* 模块里，这里只做装配。
 //
-//  模块划分：
-//    CALTimetable                课表数据模型 + 持久化
-//    CALAlarmStore               系统闹钟读写引擎
-//    CALDaemonReloader           让 mobiletimerd 重新加载数据
-//    CALScheduleEngine           纯计算：课表 → 目标时间
-//    CALApplier                  协调层：把上面几块串起来
-//    CALHomeViewController       主界面
-//    CALTimetableViewController  课表列表页
-//    CALCourseEditorViewController  单节课编辑表单
-//    CALPaddedLabel              带内边距的 UILabel
+//  两种触发方式：
+//    1. 快捷指令 xiangke://apply —— 手机解锁时可用，时间精确
+//    2. 后台自动刷新（BGTaskScheduler）—— 锁屏也能跑，由系统择机唤醒
+//       为什么需要 2：iOS 在锁屏状态下禁止「打开 URL / 打开 App」，
+//       所以快捷指令那条路在锁屏时必定失败，只能靠 App 自己在后台跑。
 //
 
 #import <UIKit/UIKit.h>
+#import <BackgroundTasks/BackgroundTasks.h>
+
 #import "CALHomeViewController.h"
 #import "CALApplier.h"
+#import "CALTimetable.h"
 
 /// 快捷指令定时自动化用的 URL Scheme：xiangke://apply
 static NSString * const kCALURLScheme = @"xiangke";
+
+/// 后台自动刷新任务标识（需与 Info.plist 的 BGTaskSchedulerPermittedIdentifiers 一致）
+static NSString * const kCALAutoRefreshTaskID = @"com.yhgeo.alarmpoc.autorefresh";
+
+/// 每次排程至少间隔多久再让系统唤醒我们
+static const NSTimeInterval kCALAutoRefreshInterval = 3 * 3600;   // 3 小时
 
 #pragma mark - AppDelegate
 
@@ -39,12 +43,20 @@ static NSString * const kCALURLScheme = @"xiangke";
     self.window.rootViewController = nav;
     [self.window makeKeyAndVisible];
 
+    [self registerAutoRefreshTask];
+    [self scheduleAutoRefresh];
+
     // 冷启动就是被 URL 唤起的：URL 在 launchOptions 里，不走 openURL:
     NSURL *launchURL = launchOptions[UIApplicationLaunchOptionsURLKey];
     if ([launchURL isKindOfClass:[NSURL class]]) {
         [self handleURL:launchURL];
     }
     return YES;
+}
+
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    // 进后台时补排一次，尽量让系统在夜间安排唤醒
+    [self scheduleAutoRefresh];
 }
 
 - (BOOL)application:(UIApplication *)application
@@ -68,6 +80,53 @@ static NSString * const kCALURLScheme = @"xiangke";
         [CALApplier applyTimetableFromURLTrigger];
     }
     return YES;
+}
+
+#pragma mark - 后台自动刷新
+
+/// 注册后台任务处理器。必须在 didFinishLaunching 里完成注册。
+- (void)registerAutoRefreshTask {
+    [[BGTaskScheduler sharedScheduler]
+        registerForTaskWithIdentifier:kCALAutoRefreshTaskID
+                           usingQueue:nil
+                        launchHandler:^(BGTask *task) {
+        [self handleAutoRefresh:(BGAppRefreshTask *)task];
+    }];
+}
+
+/// 排下一次后台唤醒。每次启动、进后台、跑完都重排一次。
+- (void)scheduleAutoRefresh {
+    BGTaskScheduler *scheduler = [BGTaskScheduler sharedScheduler];
+    [scheduler cancelTaskRequestWithIdentifier:kCALAutoRefreshTaskID];
+
+    BGAppRefreshTaskRequest *request =
+        [[BGAppRefreshTaskRequest alloc] initWithIdentifier:kCALAutoRefreshTaskID];
+    request.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:kCALAutoRefreshInterval];
+
+    NSError *error = nil;
+    [scheduler submitTaskRequest:request error:&error];
+    if (error) {
+        NSLog(@"[响课·后台] 排程失败：%@", error.localizedDescription);
+    }
+}
+
+- (void)handleAutoRefresh:(BGAppRefreshTask *)task {
+    // 先把下一次排上，免得这次出问题以后就再也不跑了
+    [self scheduleAutoRefresh];
+
+    __block BOOL finished = NO;
+    task.expirationHandler = ^{
+        if (!finished) NSLog(@"[响课·后台] 被系统回收（时间不够）");
+    };
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        CALTimetable *timetable = [CALTimetableStore shared].timetable;
+        NSString *log = [CALApplier applyTimetable:timetable];
+        NSLog(@"[响课·后台] %@", log);
+
+        finished = YES;
+        [task setTaskCompletedWithSuccess:YES];
+    });
 }
 
 @end
