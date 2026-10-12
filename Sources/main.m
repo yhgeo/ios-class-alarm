@@ -112,7 +112,17 @@ static NSString *CheckXPC(void) {
     __block NSString *result = @"(4 秒内无响应)";
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
 
-    xpc_connection_t conn = xpc_connection_create_mach_service("com.apple.mobiletimerd", NULL, 0);
+    // xpc_connection_create_mach_service 在 iOS 公开头文件中被标记为 unavailable，
+    // 但运行时可用，故用 dlsym 绕过编译期检查。
+    typedef xpc_connection_t (*CreateMachFn)(const char *, dispatch_queue_t, uint64_t);
+    typedef void (*SendWithReplyFn)(xpc_connection_t, xpc_object_t, dispatch_queue_t, void (^)(xpc_object_t));
+    CreateMachFn createMach = (CreateMachFn)dlsym(RTLD_DEFAULT, "xpc_connection_create_mach_service");
+    SendWithReplyFn sendWithReply = (SendWithReplyFn)dlsym(RTLD_DEFAULT, "xpc_connection_send_message_with_reply");
+    if (!createMach || !sendWithReply) {
+        return @"dlsym 未找到所需 XPC 函数";
+    }
+
+    xpc_connection_t conn = createMach("com.apple.mobiletimerd", NULL, 0);
     xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {
         if (xpc_get_type(event) == XPC_TYPE_ERROR) {
             const char *d = xpc_dictionary_get_string(event, XPC_ERROR_KEY_DESCRIPTION);
@@ -124,7 +134,7 @@ static NSString *CheckXPC(void) {
 
     xpc_object_t msg = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_string(msg, "kMsgType", "ping");
-    xpc_connection_send_message_with_reply(conn, msg, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
+    sendWithReply(conn, msg, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0),
         ^(xpc_object_t reply) {
             if (xpc_get_type(reply) == XPC_TYPE_ERROR) {
                 const char *d = xpc_dictionary_get_string(reply, XPC_ERROR_KEY_DESCRIPTION);
