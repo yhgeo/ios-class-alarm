@@ -1,16 +1,25 @@
 //
 //  CALImportViewController.m
 //
+//  输入方式（三条，互为备份）：
+//    1. 手动输入 / 长按编辑菜单粘贴
+//    2. UIPasteControl —— iOS 16 官方粘贴控件，点击即用户授权，不弹窗、必定可读
+//    3. 从「文件」App 选本地 JSON（完全不碰剪贴板）
+//
+//  为什么不用自己读 UIPasteboard：iOS 16 起程序化读取剪贴板会弹权限框，
+//  用户一旦拒绝就静默返回空。UIPasteControl 走的是系统授权路径，绕开这个问题。
+//
 
 #import "CALImportViewController.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 #pragma mark - 布局常量
 
-static const CGFloat kMargin   = 16.0;
-static const CGFloat kCorner   = 12.0;
-static const CGFloat kGap      = 12.0;
-static const CGFloat kButtonH  = 46.0;
-static const CGFloat kEditorH  = 132.0;
+static const CGFloat kMargin  = 16.0;
+static const CGFloat kCorner  = 12.0;
+static const CGFloat kGap     = 12.0;
+static const CGFloat kButtonH = 46.0;
+static const CGFloat kEditorH = 120.0;
 
 #pragma mark - URL 归一化
 
@@ -37,11 +46,12 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 
 #pragma mark -
 
-@interface CALImportViewController () <UITextViewDelegate>
+@interface CALImportViewController () <UITextViewDelegate, UIDocumentPickerDelegate>
 @property (nonatomic, strong) UILabel *hintLabel;
 @property (nonatomic, strong) UITextView *textView;
 @property (nonatomic, strong) UILabel *placeholderLabel;
-@property (nonatomic, strong) UIButton *pasteButton;
+@property (nonatomic, strong) UIView *pasteControl;   // 实际是 UIPasteControl
+@property (nonatomic, strong) UIButton *fileButton;
 @property (nonatomic, strong) UILabel *footnoteLabel;
 @end
 
@@ -82,7 +92,8 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     self.hintLabel.numberOfLines = 0;
     self.hintLabel.font = [UIFont systemFontOfSize:14];
     self.hintLabel.textColor = [UIColor secondaryLabelColor];
-    self.hintLabel.text = @"填入课表 JSON 的 https 地址。可以直接粘贴，或点下面的按钮从剪贴板取。";
+    self.hintLabel.text = @"填入课表 JSON 的 https 地址。可以点下面的「粘贴」按钮，"
+                           "也可以长按输入框选粘贴。";
     [self.view addSubview:self.hintLabel];
 
     self.textView = [[UITextView alloc] init];
@@ -105,25 +116,39 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     self.placeholderLabel.userInteractionEnabled = NO;
     [self.textView addSubview:self.placeholderLabel];
 
-    self.pasteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [self.pasteButton setTitle:@"从剪贴板粘贴" forState:UIControlStateNormal];
-    [self.pasteButton setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
-    self.pasteButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-    self.pasteButton.backgroundColor = [UIColor secondarySystemBackgroundColor];
-    self.pasteButton.layer.cornerRadius = kCorner;
-    [self.pasteButton addTarget:self
-                         action:@selector(onPasteFromClipboard)
-               forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.pasteButton];
+    // 系统粘贴控件：用户点击即代表授权，不会弹权限框；
+    // 剪贴板为空时它会自动置灰，正好当状态提示用。
+    if (@available(iOS 16.0, *)) {
+        UIPasteControlConfiguration *config = [[UIPasteControlConfiguration alloc] init];
+        config.displayMode = UIPasteControlDisplayModeIconAndLabel;
+        config.baseBackgroundColor = [UIColor secondarySystemBackgroundColor];
+        config.baseForegroundColor = [UIColor labelColor];
+
+        UIPasteControl *paste = [[UIPasteControl alloc] initWithConfiguration:config];
+        paste.target = self.textView;   // 由系统把剪贴板内容直接交给输入框
+        self.pasteControl = paste;
+        [self.view addSubview:paste];
+    }
+
+    self.fileButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [self.fileButton setTitle:@"从「文件」选 JSON" forState:UIControlStateNormal];
+    [self.fileButton setTitleColor:[UIColor labelColor] forState:UIControlStateNormal];
+    self.fileButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+    self.fileButton.backgroundColor = [UIColor secondarySystemBackgroundColor];
+    self.fileButton.layer.cornerRadius = kCorner;
+    [self.fileButton addTarget:self
+                        action:@selector(onPickFile)
+              forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.fileButton];
 
     self.footnoteLabel = [[UILabel alloc] init];
     self.footnoteLabel.numberOfLines = 0;
     self.footnoteLabel.font = [UIFont systemFontOfSize:12];
     self.footnoteLabel.textColor = [UIColor tertiaryLabelColor];
     self.footnoteLabel.text =
-        @"支持 GitHub Gist：填 gist 页面地址即可，会自动补 /raw。\n"
-        @"只接受 https —— iOS 默认禁止明文 http 请求。\n"
-        @"导入会整体替换当前课表。";
+        @"粘贴按钮变灰 = 剪贴板里没有文字。\n"
+        @"支持 GitHub Gist：填 gist 页面地址会自动补 /raw。\n"
+        @"只接受 https；导入会整体替换当前课表。";
     [self.view addSubview:self.footnoteLabel];
 }
 
@@ -146,8 +171,13 @@ static NSString *CALNormalizeImportURL(NSString *input) {
     self.placeholderLabel.frame = CGRectMake(ti.left + 5, ti.top,
                                              cw - ti.left - ti.right - 5, 20);
 
-    self.pasteButton.frame = CGRectMake(x, y, cw, kButtonH);
-    y = CGRectGetMaxY(self.pasteButton.frame) + kGap + 4;
+    if (self.pasteControl) {
+        self.pasteControl.frame = CGRectMake(x, y, cw, kButtonH);
+        y = CGRectGetMaxY(self.pasteControl.frame) + kGap;
+    }
+
+    self.fileButton.frame = CGRectMake(x, y, cw, kButtonH);
+    y = CGRectGetMaxY(self.fileButton.frame) + kGap + 4;
 
     CGSize footFit = [self.footnoteLabel sizeThatFits:CGSizeMake(cw, CGFLOAT_MAX)];
     self.footnoteLabel.frame = CGRectMake(x, y, cw, ceil(footFit.height));
@@ -166,44 +196,51 @@ static NSString *CALNormalizeImportURL(NSString *input) {
 - (void)onImport {
     NSString *url = CALNormalizeImportURL(self.textView.text);
     if (url.length == 0) {
-        UIAlertController *ac =
-            [UIAlertController alertControllerWithTitle:@"还没填地址"
-                                                message:@"请粘贴或输入课表 JSON 的 https 地址。"
-                                         preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"好"
-                                               style:UIAlertActionStyleDefault
-                                             handler:nil]];
-        [self presentViewController:ac animated:YES completion:nil];
+        [self alertWithTitle:@"还没填地址"
+                     message:@"请粘贴或输入课表 JSON 的 https 地址，"
+                              "也可以点「从「文件」选 JSON」。"];
         return;
     }
     [self.delegate importController:self didFinishWithURLString:url];
 }
 
-- (void)onPasteFromClipboard {
-    UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
-    NSString *text = pasteboard.string;
+- (void)onPickFile {
+    UIDocumentPickerViewController *picker =
+        [[UIDocumentPickerViewController alloc]
+            initForOpeningContentTypes:@[UTTypeJSON, UTTypePlainText]
+                                asCopy:YES];
+    picker.delegate = self;
+    picker.allowsMultipleSelection = NO;
+    [self presentViewController:picker animated:YES completion:nil];
+}
 
-    if (text.length == 0) {
-        UIAlertController *ac =
-            [UIAlertController alertControllerWithTitle:@"剪贴板是空的"
-                                                message:@"先复制课表 JSON 的地址，再回来点这个按钮。"
-                                         preferredStyle:UIAlertControllerStyleAlert];
-        [ac addAction:[UIAlertAction actionWithTitle:@"好"
-                                               style:UIAlertActionStyleDefault
-                                             handler:nil]];
-        [self presentViewController:ac animated:YES completion:nil];
-        return;
-    }
-
-    self.textView.text = [text stringByTrimmingCharactersInSet:
-                          [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    [self updatePlaceholder];
+- (void)alertWithTitle:(NSString *)title message:(NSString *)message {
+    UIAlertController *ac =
+        [UIAlertController alertControllerWithTitle:title
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [ac addAction:[UIAlertAction actionWithTitle:@"好"
+                                           style:UIAlertActionStyleDefault
+                                         handler:nil]];
+    [self presentViewController:ac animated:YES completion:nil];
 }
 
 #pragma mark - UITextViewDelegate
 
 - (void)textViewDidChange:(UITextView *)textView {
     [self updatePlaceholder];
+}
+
+#pragma mark - UIDocumentPickerDelegate
+
+- (void)documentPicker:(UIDocumentPickerViewController *)controller
+    didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    NSURL *url = urls.firstObject;
+    if (url) [self.delegate importController:self didPickFileAtURL:url];
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    // 用户取消，什么都不做
 }
 
 @end

@@ -18,6 +18,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// 用户点了「导入」
 - (void)importController:(CALImportViewController *)controller
     didFinishWithURLString:(NSString *)urlString;
+/// 用户选了本地课表文件
+- (void)importController:(CALImportViewController *)controller
+         didPickFileAtURL:(NSURL *)fileURL;
 /// 用户取消
 - (void)importControllerDidCancel:(CALImportViewController *)controller;
 @end

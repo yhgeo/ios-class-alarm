@@ -201,6 +201,13 @@ static const CGFloat kCorner       = 12.0;
     [self dismissViewControllerAnimated:YES completion:nil];
 }
 
+- (void)importController:(CALImportViewController *)controller
+         didPickFileAtURL:(NSURL *)fileURL {
+    [self dismissViewControllerAnimated:YES completion:^{
+        [self importFromFileURL:fileURL];
+    }];
+}
+
 - (void)importFromURLString:(NSString *)urlString {
     NSURL *url = urlString.length ? [NSURL URLWithString:urlString] : nil;
     if (!url) {
@@ -225,40 +232,66 @@ static const CGFloat kCorner       = 12.0;
                                      netError.localizedDescription ?: @"没有拿到数据"];
                 return;
             }
-
-            // 常见的坑：填的是网页地址，下载回来是一坨 HTML
-            NSUInteger probeLen = MIN((NSUInteger)128, data.length);
-            NSString *head = [[NSString alloc]
-                initWithData:[data subdataWithRange:NSMakeRange(0, probeLen)]
-                    encoding:NSUTF8StringEncoding];
-            if (head.length > 0 &&
-                ([head containsString:@"<!DOCTYPE"] || [head containsString:@"<!doctype"] ||
-                 [head containsString:@"<html"]      || [head containsString:@"<HTML"])) {
-                self.logView.text =
-                    @"⚠️ 下载到的不是 JSON，而是一个网页。\n\n"
-                     "多半是地址填成了网页地址，请改用 raw 地址：\n"
-                     "· GitHub Gist：点右上角 Raw 后复制地址栏（填 gist 页面地址会自动补 /raw）\n"
-                     "· GitHub 仓库：用 raw.githubusercontent.com 开头的地址";
-                return;
-            }
-
-            CALTimetableStore *store = [CALTimetableStore shared];
-            NSError *importError = nil;
-            if (![store importFromJSONData:data error:&importError]) {
-                self.logView.text = [NSString stringWithFormat:
-                    @"⚠️ 解析或保存失败：%@\n\n请检查 JSON 格式（字段说明见 README）。",
-                    importError.localizedDescription ?: @"未知错误"];
-                return;
-            }
-
-            CALTimetable *tt = store.timetable;
-            self.logView.text = [NSString stringWithFormat:
-                @"✅ 导入成功：%lu 节课，提前量 %ld 分钟。\n\n%@",
-                (unsigned long)tt.courses.count, (long)tt.advanceMinutes,
-                [store storageDiagnostics]];
-            [self refreshStatus];
+            [self applyImportedData:data];
         });
     });
+}
+
+- (void)importFromFileURL:(NSURL *)fileURL {
+    self.logView.text = [NSString stringWithFormat:@"读取文件…\n%@",
+                         fileURL.lastPathComponent ?: @"(未知文件)"];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // asCopy:YES 时其实不需要，但对 open-in-place 的文件是必需的，加上更稳
+        BOOL scoped = [fileURL startAccessingSecurityScopedResource];
+        NSError *readError = nil;
+        NSData *data = [NSData dataWithContentsOfURL:fileURL options:0 error:&readError];
+        if (scoped) [fileURL stopAccessingSecurityScopedResource];
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (data.length == 0) {
+                self.logView.text = [NSString stringWithFormat:@"⚠️ 读取文件失败：%@",
+                                     readError.localizedDescription ?: @"文件是空的"];
+                return;
+            }
+            [self applyImportedData:data];
+        });
+    });
+}
+
+/// 解析并保存导入的数据 —— URL 导入与文件导入共用
+- (void)applyImportedData:(NSData *)data {
+    // 常见的坑：填的是网页地址，拿回来是一坨 HTML
+    NSUInteger probeLen = MIN((NSUInteger)128, data.length);
+    NSString *head = [[NSString alloc]
+        initWithData:[data subdataWithRange:NSMakeRange(0, probeLen)]
+            encoding:NSUTF8StringEncoding];
+    if (head.length > 0 &&
+        ([head containsString:@"<!DOCTYPE"] || [head containsString:@"<!doctype"] ||
+         [head containsString:@"<html"]      || [head containsString:@"<HTML"])) {
+        self.logView.text =
+            @"⚠️ 内容不是 JSON，而是一个网页。\n\n"
+             "多半是地址填成了网页地址，请改用 raw 地址：\n"
+             "· GitHub Gist：点右上角 Raw 后复制地址栏（填 gist 页面地址会自动补 /raw）\n"
+             "· GitHub 仓库：用 raw.githubusercontent.com 开头的地址";
+        return;
+    }
+
+    CALTimetableStore *store = [CALTimetableStore shared];
+    NSError *importError = nil;
+    if (![store importFromJSONData:data error:&importError]) {
+        self.logView.text = [NSString stringWithFormat:
+            @"⚠️ 解析或保存失败：%@\n\n请检查 JSON 格式（字段说明见 README）。",
+            importError.localizedDescription ?: @"未知错误"];
+        return;
+    }
+
+    CALTimetable *tt = store.timetable;
+    self.logView.text = [NSString stringWithFormat:
+        @"✅ 导入成功\n常规课表 %lu 节 · 按日期 %lu 天 · 提前量 %ld 分钟\n\n%@",
+        (unsigned long)tt.courses.count, (unsigned long)tt.overrides.count,
+        (long)tt.advanceMinutes, [store storageDiagnostics]];
+    [self refreshStatus];
 }
 
 #pragma mark - URL 唤起

@@ -39,6 +39,7 @@ jobs:
             -framework UIKit \
             -framework Foundation \
             -framework CoreGraphics \
+            -framework UniformTypeIdentifiers \
             -framework Security \
             -o "$APP/XiangKe" \
             $SOURCES

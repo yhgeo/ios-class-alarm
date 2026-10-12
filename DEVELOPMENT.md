@@ -68,7 +68,8 @@
 SOURCES=$(find Sources -name '*.m')
 xcrun --sdk iphoneos clang -arch arm64 -isysroot $SDK \
     -miphoneos-version-min=16.0 -fobjc-arc -ISources \
-    -framework UIKit -framework Foundation -framework CoreGraphics -framework Security \
+    -framework UIKit -framework Foundation -framework CoreGraphics \
+    -framework UniformTypeIdentifiers -framework Security \
     -o XiangKe.app/XiangKe $SOURCES
 
 cp Sources/Info.plist XiangKe.app/Info.plist
@@ -98,6 +99,15 @@ zip -r XiangKe.ipa Payload
 - **`no-sandbox` 下 `NSHomeDirectory()` 返回 `/var/mobile`**，不是 App 沙箱，别用它拼数据路径
 - **`no-sandbox` 下 `NSDocumentDirectory` 指向 `/var/mobile/Documents`，不保证可写**；
   写文件后一定要**回读校验**，`writeToFile:` 返回 YES 也不代表真的落盘了
+
+**剪贴板（iOS 16）**
+- iOS 16 起，**程序化读取 `UIPasteboard` 会弹权限框**；用户一旦拒绝，之后**静默返回空**，
+  且不再提示 —— 表现为「剪贴板是空的」，很容易误判成剪贴板真的没内容
+- 正确做法是用 **`UIPasteControl`**（iOS 16 新增的系统控件）：用户点击即代表授权，
+  不弹框、必定可读；剪贴板为空时它会**自动置灰**，正好当状态提示
+  - `paste.target = <目标 responder>`，系统会把内容直接交给目标（如 `UITextView`）
+- 兜底方案：`UIDocumentPickerViewController` 选本地文件，完全不碰剪贴板
+- `UIPasteboard.changeCount` 不需要权限，可用来区分「剪贴板真的空」和「读取被拒」
 
 **UI**
 - **iOS App 图标不能带 alpha 通道**，否则整张图渲染成黑块。源图若是透明底，必须先合成到实色背景再转 RGB
