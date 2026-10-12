@@ -37,6 +37,7 @@ jobs:
             -ISources \
             -framework UIKit \
             -framework Foundation \
+            -framework CoreGraphics \
             -framework Security \
             -o "$APP/AlarmPoC" \
             $SOURCES

@@ -14,7 +14,7 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 | 读写系统闹钟（私有 API 路线） | ✅ 已验证可行 |
 | 模块化 App 骨架 | ✅ 已完成 |
 | 载入示例课表 + 一键应用 | ✅ 已完成 |
-| 课表编辑界面 | ⬜ 待做 |
+| 课表编辑界面（增 / 删 / 改 / 提前量） | ✅ 已完成 |
 | 远程 JSON 导入（GitHub Gist） | ⬜ 待做 |
 | 快捷指令动作（App Intent） | ⬜ 待做 |
 
@@ -30,8 +30,10 @@ iOS 16 的快捷指令有「添加闹钟」但没有「删除闹钟」，纯快�
 | `CALDaemonReloader.h/.m` | 让 mobiletimerd 重新加载数据（换方案只改这里） |
 | `CALScheduleEngine.h/.m` | 纯计算：课表 → 目标时间（无副作用） |
 | `CALApplier.h/.m` | 协调层，唯一知道完整流程的模块 |
-| `CALHomeViewController.h/.m` | 界面 |
-| `main.m` | 入口与装配 |
+| `CALHomeViewController.h/.m` | 主界面：状态 + 应用 / 编辑 / 示例 / 清理 |
+| `CALTimetableViewController.h/.m` | 课表列表：按星期分组，增删改 + 提前量 |
+| `CALCourseEditorViewController.h/.m` | 单节课编辑表单（只收集输入并回调） |
+| `main.m` | 入口与装配（导航栈） |
 
 ## 课表数据格式
 
@@ -96,5 +98,7 @@ zip -r AlarmPoC.ipa Payload
 
 1. 打开 Actions 页面，等 `Build PoC IPA` 跑完，下载产物 `AlarmPoC-ipa`
 2. 用 TrollStore 安装
-3. 打开 App → 点「载入示例课表」→ 点「立即应用」
-4. 打开系统「时钟」App 核对
+3. 打开 App → 点「编辑课表」录入课程（右上角 `+` 新增，左滑删除，点行编辑；
+   顶部「提前提醒」可改提前量），也可先点「载入示例课表」体验
+4. 回主页点「立即应用（设置次日闹钟）」
+5. 打开系统「时钟」App 核对
