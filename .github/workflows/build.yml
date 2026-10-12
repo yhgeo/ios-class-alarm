@@ -43,18 +43,24 @@ jobs:
           done
 
           # ---------- 2) Swift → .o ----------
-          # App Intents 的元数据提取依赖常量值 sidecar（.swiftconstvalues）。
-          # 该 flag 在较老的 Xcode 上可能不存在，所以失败就退回普通编译。
+          # 尝试让编译器额外产出常量值 sidecar（.swiftconstvalues），
+          # 它是「编译期提取」App Intents 元数据的输入。
+          # 注意：该 flag 可能被接受却什么都不写，所以判断依据是「文件是否真的存在」，
+          # 而不是退出码。
           CV="$OBJ/XiangKeIntent.swiftconstvalues"
-          if xcrun --sdk iphoneos swiftc \
-               -target arm64-apple-ios16.0 -sdk "$SDK" -O \
-               -module-name XiangKe -parse-as-library \
-               -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
-               -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
-               2> build/swift-err.log; then
-            echo "✓ Swift 编译完成（含常量值 sidecar）"
+          xcrun --sdk iphoneos swiftc \
+            -target arm64-apple-ios16.0 -sdk "$SDK" -O \
+            -module-name XiangKe -parse-as-library \
+            -Xfrontend -emit-const-values-path -Xfrontend "$CV" \
+            -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
+            2> build/swift-err.log || true
+
+          if [ -f "$CV" ]; then
+            echo "✓ 已产出常量值 sidecar"
+          elif [ -f "$OBJ/XiangKeIntent.o" ]; then
+            echo "· 无 sidecar（此 Xcode 版本不产出），保留已编译对象"
           else
-            echo "⚠️ 带 -emit-const-values-path 失败，退回普通编译："
+            echo "⚠️ 首次编译失败，退回普通编译："
             cat build/swift-err.log || true
             xcrun --sdk iphoneos swiftc \
               -target arm64-apple-ios16.0 -sdk "$SDK" -O \
@@ -101,56 +107,75 @@ jobs:
           echo "processor = ${PROC:-<未找到>}"
           [ -x "$PROC" ] || { echo "❌ 找不到 appintentsmetadataprocessor"; exit 1; }
 
-          find Sources -name '*.swift' > build/SwiftFileList
+          # Xcode 15.4 的该工具要求 --xcode-version，且不支持 --bundle-identifier
+          XCODE_VER=$(xcodebuild -version | awk '/Build version/{print $3}')
+          echo "xcode-version = $XCODE_VER"
+
+          # 源文件列表（绝对路径）
+          ( cd Sources && ls *.swift ) | sed "s|^|$PWD/Sources/|" > build/SwiftFileList
+          echo "--- Swift 源文件 ---"; cat build/SwiftFileList
+
+          echo "--- 查找常量值 sidecar ---"
+          find build -name '*.swiftconstvalues' -print || true
 
           CV="$PWD/build/obj/XiangKeIntent.swiftconstvalues"
-          CVFLAGS=()
+          HAS_CV=0
           if [ -f "$CV" ]; then
             echo "$CV" > build/SwiftConstValuesFileList
-            CVFLAGS=(--swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
-                     --compile-time-extraction)
-            echo "✓ 找到常量值 sidecar，启用编译期提取"
+            HAS_CV=1
+            echo "✓ 有常量值 sidecar，可用编译期提取"
           else
-            echo "· 没有常量值 sidecar，退回运行期提取"
+            echo "· 无常量值 sidecar —— 走二进制提取（Xcode 15 的默认路径）"
           fi
 
-          echo "===== processor --help ====="
-          "$PROC" --help 2>&1 | head -80 || true
-          echo "==========================="
-
-          run_proc() {
+          base_args() {
             "$PROC" \
               --toolchain-dir "$TOOLCHAIN" \
               --module-name XiangKe \
               --sdk-root "$SDK" \
+              --xcode-version "$XCODE_VER" \
               --platform-family iOS \
               --deployment-target 16.0 \
-              --bundle-identifier com.yhgeo.alarmpoc \
               --output "$APP" \
               --target-triple arm64-apple-ios16.0 \
               --binary-file "$APP/XiangKe" \
               --source-file-list "$PWD/build/SwiftFileList" \
-              --no-app-shortcuts-localization \
+              --ignore-query-generics-errors \
+              --force \
               "$@"
           }
 
-          if run_proc ${CVFLAGS[@]+"${CVFLAGS[@]}"}; then
-            echo "✓ 元数据生成成功（完整参数）"
-          else
-            echo "⚠️ 完整参数失败，改用最小参数集重试"
-            if run_proc; then
-              echo "✓ 元数据生成成功（最小参数）"
+          ok=0
+          for mode in --legacy-extraction __default__; do
+            echo "===== 尝试：$mode ====="
+            if [ "$mode" = "__default__" ]; then
+              if base_args; then ok=1; break; fi
             else
-              echo "❌ 元数据生成失败"
-              exit 1
+              if base_args "$mode"; then ok=1; break; fi
+            fi
+            echo "（该参数组合失败，继续下一种）"
+          done
+
+          if [ "$ok" -ne 1 ] && [ "$HAS_CV" -eq 1 ]; then
+            echo "===== 尝试：编译期提取 ====="
+            if base_args --swift-const-vals-list "$PWD/build/SwiftConstValuesFileList" \
+                         --compile-time-extraction; then
+              ok=1
             fi
           fi
 
+          [ "$ok" -eq 1 ] || { echo "❌ 所有参数组合都失败"; exit 1; }
+
           echo "--- Metadata.appintents ---"
-          ls -la "$APP/Metadata.appintents"
-          echo "--- 元数据里是否含我们的意图 ---"
-          strings "$APP/Metadata.appintents/extract.actionsdata" 2>/dev/null \
-            | grep -i "XiangKeProbe" || echo "(未找到 XiangKeProbe 字样)"
+          ls -la "$APP/Metadata.appintents" || { echo "❌ 没有产出 Metadata.appintents"; exit 1; }
+
+          echo "--- actionsdata 内容检查 ---"
+          if strings "$APP/Metadata.appintents/extract.actionsdata" 2>/dev/null \
+               | grep -qi "XiangKeProbe"; then
+            echo "✓ 元数据里找到 XiangKeProbeIntent"
+          else
+            echo "⚠️ 元数据里没找到 XiangKeProbeIntent"
+          fi
 
       - name: Inject entitlements and package IPA
         run: |
