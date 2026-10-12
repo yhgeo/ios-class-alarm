@@ -14,6 +14,7 @@
 	<true/>
 	<key>com.apple.security.exception.mach-lookup.global-name</key>
 	<array>
+		<string>com.apple.MobileTimer.alarmserver</string>
 		<string>com.apple.mobiletimerd</string>
 		<string>com.apple.MobileTimer</string>
 	</array>
