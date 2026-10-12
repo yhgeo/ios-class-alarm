@@ -3,6 +3,10 @@ name: Build PoC IPA
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - '.workbuddy-ai/**'
   workflow_dispatch:
 
 jobs:
