@@ -1,0 +1,53 @@
+name: Build PoC IPA
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install xcodegen and ldid
+        run: brew install xcodegen ldid
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build app
+        run: |
+          xcodebuild \
+            -project AlarmPoC.xcodeproj \
+            -scheme AlarmPoC \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Inject entitlements and package IPA
+        run: |
+          APP="build/Build/Products/Release-iphoneos/AlarmPoC.app"
+          ls -la "$APP"
+          ldid -Sentitlements.plist "$APP/AlarmPoC"
+          ldid -e "$APP/AlarmPoC" > applied-entitlements.plist
+          echo "----- applied entitlements -----"
+          cat applied-entitlements.plist
+          rm -rf Payload AlarmPoC.ipa
+          mkdir -p Payload
+          cp -r "$APP" Payload/
+          zip -qry AlarmPoC.ipa Payload
+          ls -lh AlarmPoC.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: AlarmPoC-ipa
+          path: AlarmPoC.ipa
+          retention-days: 30
