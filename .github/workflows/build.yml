@@ -64,29 +64,29 @@ jobs:
 
             xcrun --sdk iphoneos swiftc \
               -target arm64-apple-ios16.0 -sdk "$SDK" \
-              -module-name XiangKe -parse-as-library \
+              -module-name XiangKe \
               "$@" -c Sources/XiangKeIntent.swift -o "$OBJ/XiangKeIntent.o" \
-              >/dev/null 2>&1 || true
+              > build/swift-out.log 2>&1 || true
 
             # -print -quit：找到第一个就停，避免 head 触发 SIGPIPE
             found=$(find build -name '*.swiftconstvalues' -print -quit 2>/dev/null)
             if [ -n "$found" ]; then
               cp -f "$found" "$CV"
-              echo "✓ 常量值 sidecar 产出成功 ← [${label}]（来源 $found）"
+              echo "✓ 常量值 sidecar 产出成功 ← [${label}]（来源 ${found}）"
               return 0
             fi
-            echo "· 未产出 ← [${label}]"
+            echo "· 未产出 ← [${label}]；编译器输出："
+            head -8 build/swift-out.log || true
             return 1
           }
 
-          # A：驱动层开关 —— 预期正解
+          # A：驱动层开关，不加 -parse-as-library
           gen_sidecar "A -emit-const-values" -emit-const-values || true
 
-          # A2：驱动开关 + 显式路径
+          # A2：驱动开关 + -parse-as-library
           if [ ! -f "$CV" ]; then
-            gen_sidecar "A2 驱动开关+显式路径" \
-              -emit-const-values \
-              -Xfrontend -emit-const-values-path -Xfrontend "$CV" || true
+            gen_sidecar "A2 驱动开关 + parse-as-library" \
+              -emit-const-values -parse-as-library || true
           fi
 
           # B：历史写法（只给前端路径）
