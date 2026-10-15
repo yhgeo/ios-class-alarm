@@ -32,6 +32,9 @@ static NSDate *CALTomorrow(void) {
     return d ?: [NSDate dateWithTimeIntervalSinceNow:24 * 3600];
 }
 
+/// 上次执行时间存在这里（NSUserDefaults）
+static NSString * const kCALLastAppliedKey = @"CALLastAppliedAt";
+
 #pragma mark - CALApplier
 
 NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
@@ -41,11 +44,20 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
 + (void)clearClockAppCacheWithLog:(NSMutableString *)log;
 /// 系统里所有标题带课表前缀的闹钟
 + (NSArray<CALSystemAlarm *> *)managedAlarms;
+/// 实际流程；拆出来是为了让「记录执行时间」只写一处
++ (NSString *)applyCore:(CALTimetable *)timetable;
 @end
 
 @implementation CALApplier
 
 + (NSString *)applyTimetable:(CALTimetable *)timetable {
+    NSString *log = [self applyCore:timetable];
+    // 不论有没有实际改动（可能是「已是最新，跳过」），都算执行过一次
+    [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:kCALLastAppliedKey];
+    return log;
+}
+
++ (NSString *)applyCore:(CALTimetable *)timetable {
     NSMutableString *log = [NSMutableString string];
     NSDate *tomorrow = CALTomorrow();
 
@@ -182,6 +194,21 @@ NSNotificationName const CALDidApplyNotification = @"CALDidApplyNotification";
                             userInfo:@{@"log": log ?: @""}];
         });
     });
+}
+
+#pragma mark - 执行记录
+
++ (NSDate *)lastAppliedDate {
+    return [[NSUserDefaults standardUserDefaults] objectForKey:kCALLastAppliedKey];
+}
+
++ (NSString *)lastAppliedDescription {
+    NSDate *d = [self lastAppliedDate];
+    if (!d) return @"从未";
+    NSDateFormatter *f = [[NSDateFormatter alloc] init];
+    f.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    f.dateFormat = @"MM-dd HH:mm";
+    return [f stringFromDate:d];
 }
 
 @end

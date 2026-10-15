@@ -29,6 +29,12 @@ extern NSNotificationName const CALDidApplyNotification;
 /// 不依赖界面是否已加载 —— 逻辑跑完再通知，界面没起来也不会漏做。
 + (void)applyTimetableFromURLTrigger;
 
+/// 上次执行「应用课表」的时间（手动 / 快捷指令 / 后台刷新 / 常驻定时都算）；从未执行为 nil
++ (nullable NSDate *)lastAppliedDate;
+
+/// 上次执行时间的可读描述（如 "10-14 22:00"）；从未执行返回「从未」
++ (NSString *)lastAppliedDescription;
+
 @end
 
 NS_ASSUME_NONNULL_END
