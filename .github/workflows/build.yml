@@ -64,9 +64,51 @@ jobs:
           zip -qry XiangKe.ipa Payload
           ls -lh XiangKe.ipa
 
+      - name: Sign shortcut (best effort)
+        run: |
+          set -euo pipefail
+          UNSIGNED="XiangKeAlarms.unsigned.shortcut"
+          SIGNED="XiangKeAlarms.shortcut"
+          rm -f "$SIGNED"
+
+          if [ ! -f "$UNSIGNED" ]; then
+            echo "没有 $UNSIGNED，跳过"
+            exit 0
+          fi
+
+          SC=""
+          for c in /usr/bin/shortcuts "$(xcrun --find shortcuts 2>/dev/null || true)"; do
+            if [ -n "$c" ] && [ -x "$c" ]; then SC="$c"; break; fi
+          done
+          echo "shortcuts CLI = ${SC:-<未找到>}"
+
+          signed_ok=0
+          if [ -n "$SC" ]; then
+            echo "=== 尝试签名 ==="
+            if "$SC" sign --mode anyone --input "$UNSIGNED" --output "$SIGNED" 2>&1; then
+              if [ -f "$SIGNED" ]; then signed_ok=1; fi
+            fi
+          fi
+
+          if [ "$signed_ok" -eq 1 ]; then
+            echo "✓ 签名成功"
+          else
+            echo "⚠️ 签名不可用 —— 回退到未签名版本（导入时需先在 设置→快捷指令 里"
+            echo "   打开「允许不受信任的快捷指令」）"
+            cp "$UNSIGNED" "$SIGNED"
+          fi
+          ls -la "$SIGNED"
+
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: XiangKe-ipa
           path: out/XiangKe.ipa
+          retention-days: 30
+
+      - name: Upload shortcut
+        uses: actions/upload-artifact@v4
+        with:
+          name: XiangKe-shortcut
+          path: XiangKeAlarms*.shortcut
           retention-days: 30
