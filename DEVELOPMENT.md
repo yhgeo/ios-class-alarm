@@ -86,6 +86,43 @@
 - 「URL 唤起」的记录全部是 `isProtectedDataAvailable = YES`（即解锁状态）——
   锁屏那次根本没被拉起，与「锁屏禁止打开 URL」完全吻合。
 
+### 快捷指令是生成的，不是手搭的
+
+`tools/make_shortcut.py` 直接产出 `.shortcut` 文件（未签名 XML plist，30 个动作），
+省掉用户手工搭 30 步。格式参考公开逆向资料：`WFWorkflowActions` 数组，
+每个动作是 `WFWorkflowActionIdentifier` + `WFWorkflowActionParameters`；
+动作间用 `WFTextTokenAttachment`（带 `OutputUUID`）引用输出；
+条件分支用 `WFControlFlowMode`（0=如果 / 1=否则 / 2=结束）+ `GroupingIdentifier` 配对。
+
+**动作标识符**（关键，写错了动作就丢）：
+
+| 用途 | 标识符 |
+|---|---|
+| 获取 URL 内容 | `is.workflow.actions.downloadurl` |
+| 从输入获取字典 | `is.workflow.actions.detect.dictionary` |
+| 当前日期 | `is.workflow.actions.date` |
+| 调整日期 | `is.workflow.actions.adjustdate` |
+| 格式化日期 | `is.workflow.actions.format.date` |
+| 获取字典值 | `is.workflow.actions.getvalueforkey` |
+| 如果 | `is.workflow.actions.conditional` |
+| **开关闹钟** | `is.workflow.actions.alarm.toggle`（参数 `WFAlarm` + `WFEnabled`） |
+
+**两处限制**：
+
+1. **闹钟选择器（`WFAlarm`）填不了。** 它存的是设备上那个闹钟的引用，与设备绑定，
+   没法预先写死。所以导入后要逐个点开那 12 个「开关闹钟」手动选 —— 这是唯一的遗留手工步骤。
+2. **签名不可用。** `shortcuts sign --mode anyone` 是 macOS 自带命令，但需要
+   **登录 iCloud**（日志原话：`Error: In order to do this, you must be signed into iCloud.`），
+   CI 机器做不到。所以只能给未签名版本 —— 导入前需在 `设置 → 快捷指令` 打开
+   **「允许不受信任的快捷指令」**。
+
+**托管**：`.shortcut` 入库后走 raw 地址；导入入口是 `index.html`（GitHub Pages，
+`https://yhgeo.github.io/ios-class-alarm/`），里面一个 `shortcuts://import-shortcut/?url=...&name=...`
+按钮，手机上点一下就进快捷指令 App。
+
+> ⚠️ `.gitattributes` 里有 `*.shortcut -text`。签名是对文件内容算的哈希，
+> 换行符转换会让签名失效，必须按二进制处理。
+
 ## 工作原理
 
 ```
