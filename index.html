@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>响课 · 导入快捷指令</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 28px 20px 60px; max-width: 640px; margin-inline: auto;
+    background: #fff; color: #1c1c1e;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #000; color: #f2f2f7; }
+    .card { background: #1c1c1e !important; }
+    .muted { color: #98989d !important; }
+    code { background: #2c2c2e !important; }
+  }
+  h1 { font-size: 22px; margin: 0 0 6px; }
+  h2 { font-size: 16px; margin: 28px 0 8px; }
+  p { margin: 8px 0; }
+  .muted { color: #6c6c70; font-size: 14px; }
+  a.btn {
+    display: block; text-align: center; text-decoration: none;
+    background: #0a84ff; color: #fff; padding: 16px; border-radius: 12px;
+    font-size: 17px; font-weight: 600; margin: 22px 0 10px;
+  }
+  a.btn:active { background: #0060df; }
+  .card { background: #f2f2f7; border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
+  ol, ul { padding-left: 22px; margin: 8px 0; }
+  li { margin: 5px 0; }
+  code { background: #e5e5ea; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
+  .warn { border-left: 3px solid #ff9f0a; padding-left: 12px; }
+</style>
+</head>
+<body>
+
+<h1>响课 · 开关闹钟</h1>
+<p class="muted">每天自动开关「时钟」里那 6 个课表闹钟。不打开任何 App，<b>锁屏时也能跑</b>。</p>
+
+<a class="btn" href="shortcuts://import-shortcut/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyhgeo%2Fios-class-alarm%2Fmain%2FXiangKeAlarms.shortcut&amp;name=%E5%93%8D%E8%AF%BE%E5%BC%80%E5%85%B3%E9%97%B9%E9%92%9F">导入到「快捷指令」</a>
+
+<p class="muted">点了没反应？先做这一步再点：<br>
+<code>设置 → 快捷指令 → 允许不受信任的快捷指令</code>（打开）</p>
+
+<h2>导入后要做两件事</h2>
+
+<div class="card warn">
+  <b>① 选闹钟（必做）</b><br>
+  快捷指令里有 12 个「开关闹钟」动作，它们的闹钟选择器是空的 ——
+  因为闹钟引用跟设备绑定，没法预先写好。<br><br>
+  逐个点开，从列表里选：
+  <ul>
+    <li>第 <b>1～6</b> 个（动作设为「关闭」）：<code>课表 07:50</code>、<code>课表 09:45</code>、<code>课表 10:00</code>、<code>课表 13:30</code>、<code>课表 15:25</code>、<code>课表 18:00</code></li>
+    <li>第 <b>7～12</b> 个（在各自的「如果」里，动作设为「打开」）：同上，一一对应</li>
+  </ul>
+  前提：这 6 个闹钟得先在「时钟」里建好（见下方）。
+</div>
+
+<div class="card">
+  <b>② 建自动化</b>
+  <ol>
+    <li>「快捷指令」→ 自动化 → <code>+</code> → 特定时间 → 每天 <code>22:00</code></li>
+    <li>动作选刚导入的「响课开关闹钟」</li>
+    <li>关掉「运行前询问」；iOS 16 还要关掉「运行时通知」</li>
+  </ol>
+</div>
+
+<h2>前置：时钟里先建 6 个闹钟</h2>
+<p class="muted">「时钟」→ 闹钟 → 新建，重复全部设为<b>不重复</b>：</p>
+<table style="width:100%;border-collapse:collapse;font-size:15px">
+  <tr><th style="text-align:left;padding:6px 0">标签</th><th style="text-align:left">时间</th><th style="text-align:left">对应最早课</th></tr>
+  <tr><td>课表 07:50</td><td>07:50</td><td>08:20</td></tr>
+  <tr><td>课表 09:45</td><td>09:45</td><td>10:15</td></tr>
+  <tr><td>课表 10:00</td><td>10:00</td><td>10:30</td></tr>
+  <tr><td>课表 13:30</td><td>13:30</td><td>14:00</td></tr>
+  <tr><td>课表 15:25</td><td>15:25</td><td>15:55</td></tr>
+  <tr><td>课表 18:00</td><td>18:00</td><td>18:30</td></tr>
+</table>
+
+<h2>怎么确认它工作</h2>
+<p>导入后先在快捷指令里<b>手动点一次运行</b>，然后打开「时钟」——
+应该只剩「明天该用的那一个」是开着的。</p>
+
+<p class="muted" style="margin-top:32px">
+  对照表来源：<code>alarms.json</code>（Gist，每天由快捷指令联网获取）。<br>
+  课表变了要重新生成对照表，并重新导入这条快捷指令。
+</p>
+
+</body>
+</html>
