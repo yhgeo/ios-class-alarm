@@ -105,18 +105,22 @@
 动作间用 `WFTextTokenAttachment`（带 `OutputUUID`）引用输出；
 条件分支用 `WFControlFlowMode`（0=如果 / 1=否则 / 2=结束）+ `GroupingIdentifier` 配对。
 
-**动作标识符**（关键，写错了动作就丢）：
+**动作标识符**（关键，写错了动作就丢）。
+中文名那一列是**快捷指令里实际显示的名字** —— 用户反馈「从输入获取字典」搜不到，
+原因是 **Apple 的中文用的是「词典」不是「字典」**：
 
-| 用途 | 标识符 |
+| 中文名 | 标识符 |
 |---|---|
 | 获取 URL 内容 | `is.workflow.actions.downloadurl` |
-| 从输入获取字典 | `is.workflow.actions.detect.dictionary` |
-| 当前日期 | `is.workflow.actions.date` |
+| 从输入获取词典 | `is.workflow.actions.detect.dictionary` |
+| 日期 | `is.workflow.actions.date` |
 | 调整日期 | `is.workflow.actions.adjustdate` |
 | 格式化日期 | `is.workflow.actions.format.date` |
-| 获取字典值 | `is.workflow.actions.getvalueforkey` |
+| 获取词典值 | `is.workflow.actions.getvalueforkey` |
 | 如果 | `is.workflow.actions.conditional` |
 | **开关闹钟** | `is.workflow.actions.alarm.toggle`（参数 `WFAlarm` + `WFEnabled`） |
+
+> 「开关闹钟」这个名字已由公开教程交叉验证（iOS 节假日闹钟自动化就是这么叫的）。
 
 查动作定义最快的方式：`gh api repos/pfgithub/scpl/contents/docs/actions/<动作名>.md`
 （里面有每个动作的 `source json`，直接给出 `Key` 与参数类型）。

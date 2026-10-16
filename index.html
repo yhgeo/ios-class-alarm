@@ -65,25 +65,33 @@
 
 <p>「快捷指令」→ 右上角 <code>+</code> → 按顺序添加下面 9 个动作。<b>一共只要 11 步操作</b>。</p>
 
+<div class="card" style="border-left:3px solid #0a84ff">
+  <b>搜动作时注意</b><br>
+  <span class="muted">
+  Apple 的中文用的是 <b>「词典」不是「字典」</b> —— 搜「字典」是找不到的。<br>
+  下表「动作」那一列后面的括号，就是该在搜索框里输入的关键词。
+  </span>
+</div>
+
 <table>
-  <tr><th>#</th><th>动作</th><th>设置</th></tr>
+  <tr><th>#</th><th>动作（搜这个）</th><th>设置</th></tr>
   <tr>
-    <td>1</td><td><b>获取 URL 内容</b></td>
+    <td>1</td><td><b>获取 URL 内容</b>（搜 <code>URL</code>）</td>
     <td>地址填：<br><code>https://gist.githubusercontent.com/yhgeo/a1319b6b00cf0cd73c19a4b7f0d47fb8/raw/alarms.json</code></td>
   </tr>
-  <tr><td>2</td><td><b>从输入获取字典</b></td><td>输入 = 上一步的结果（默认就是）</td></tr>
-  <tr><td>3</td><td><b>调整日期</b></td><td>日期 = 当前日期；操作 = 添加；1 天</td></tr>
-  <tr><td>4</td><td><b>格式化日期</b></td><td>日期 = 上一步结果；格式选「自定义」，填 <code>yyyy-MM-dd</code></td></tr>
-  <tr><td>5</td><td><b>获取字典值</b></td><td>从第 2 步的字典里，取第 4 步结果这个键 → 得到明天该用的时间</td></tr>
-  <tr><td>6</td><td><b>开关闹钟</b></td><td>闹钟选「课表 07:50」，操作 = <b>关闭</b></td></tr>
-  <tr><td>7</td><td><b>开关闹钟</b></td><td>闹钟选「课表 09:45」，操作 = <b>关闭</b></td></tr>
+  <tr><td>2</td><td><b>从输入获取词典</b>（搜 <code>词典</code>）</td><td>输入 = 上一步的结果（默认就是）</td></tr>
+  <tr><td>3</td><td><b>调整日期</b>（搜 <code>日期</code>）</td><td>日期 = 当前日期（默认）；操作 = 添加；1 天</td></tr>
+  <tr><td>4</td><td><b>格式化日期</b>（搜 <code>日期</code>）</td><td>日期 = 上一步结果；格式选「自定义」，填 <code>yyyy-MM-dd</code></td></tr>
+  <tr><td>5</td><td><b>获取词典值</b>（搜 <code>词典</code>）</td><td>从第 2 步的词典里，取第 4 步结果这个键 → 得到明天该用的时间</td></tr>
+  <tr><td>6</td><td><b>开关闹钟</b>（搜 <code>闹钟</code>）</td><td>闹钟选「课表 07:50」，操作 = <b>关闭</b></td></tr>
+  <tr><td>7</td><td><b>开关闹钟</b>（搜 <code>闹钟</code>）</td><td>闹钟选「课表 09:45」，操作 = <b>关闭</b></td></tr>
   <tr>
-    <td>8</td><td><b>如果</b></td>
+    <td>8</td><td><b>如果</b>（搜 <code>如果</code>）</td>
     <td>条件：第 5 步结果 <b>是</b> <code>07:50</code><br>
         在里面放一个「开关闹钟」：闹钟选「课表 07:50」，操作 = <b>打开</b></td>
   </tr>
   <tr>
-    <td>9</td><td><b>如果</b></td>
+    <td>9</td><td><b>如果</b>（搜 <code>如果</code>）</td>
     <td>条件：第 5 步结果 <b>是</b> <code>09:45</code><br>
         在里面放一个「开关闹钟」：闹钟选「课表 09:45」，操作 = <b>打开</b></td>
   </tr>
