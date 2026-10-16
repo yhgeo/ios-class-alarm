@@ -90,28 +90,19 @@ def emit(identifier: str, params: dict = None, output_name: str = None) -> str:
     return uid
 
 
-# ---------------------------------------------------------------- 1. 取表
-fetch = emit(
-    "is.workflow.actions.downloadurl",
-    {"WFURL": TABLE_URL, "WFHTTPMethod": "GET"},
-    output_name="对照表内容",
-)
+# 动作顺序与 README 的手工指南一致：
+# 先算日期 → 再取网络数据 → 再查表。
+# 这样在手工搭建时，后一个动作的输入能自动接上前一个，只剩「键」需要手选变量。
+# （本脚本里连线是按 UUID 显式指定的，顺序不影响功能。）
 
-# ---------------------------------------------------------------- 2. 解析成字典
-dict_uid = emit(
-    "is.workflow.actions.detect.dictionary",
-    {"WFInput": ref_output(fetch, "Contents of URL")},
-    output_name="对照表",
-)
-
-# ---------------------------------------------------------------- 3. 今天
+# ---------------------------------------------------------------- 1. 今天
 today = emit(
     "is.workflow.actions.date",
     {"WFDateActionMode": "Current Date"},
     output_name="今天",
 )
 
-# ---------------------------------------------------------------- 4. +1 天
+# ---------------------------------------------------------------- 2. +1 天
 tomorrow = emit(
     "is.workflow.actions.adjustdate",
     {
@@ -122,7 +113,7 @@ tomorrow = emit(
     output_name="明天",
 )
 
-# ---------------------------------------------------------------- 5. 格式化成 yyyy-MM-dd
+# ---------------------------------------------------------------- 3. 格式化成 yyyy-MM-dd
 key_uid = emit(
     "is.workflow.actions.format.date",
     {
@@ -131,6 +122,20 @@ key_uid = emit(
         "WFDateFormat": "yyyy-MM-dd",
     },
     output_name="日期键",
+)
+
+# ---------------------------------------------------------------- 4. 取表
+fetch = emit(
+    "is.workflow.actions.downloadurl",
+    {"WFURL": TABLE_URL, "WFHTTPMethod": "GET"},
+    output_name="对照表内容",
+)
+
+# ---------------------------------------------------------------- 5. 解析成词典
+dict_uid = emit(
+    "is.workflow.actions.detect.dictionary",
+    {"WFInput": ref_output(fetch, "Contents of URL")},
+    output_name="对照表",
 )
 
 # ---------------------------------------------------------------- 6. 查表
