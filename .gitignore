@@ -18,3 +18,6 @@ Thumbs.db
 
 # 个人课表数据，不入库
 我的课表*/
+
+# 快捷指令生成产物（当前无法导入 iOS，仅作参考）
+XiangKeAlarms*.shortcut

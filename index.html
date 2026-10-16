@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>响课 · 导入快捷指令</title>
+<title>响课 · 开关闹钟 搭建指南</title>
 <style>
   :root { color-scheme: light dark; }
   body {
-    font: 16px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    margin: 0; padding: 28px 20px 60px; max-width: 640px; margin-inline: auto;
+    font: 16px/1.75 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0 auto; padding: 26px 18px 70px; max-width: 660px;
     background: #fff; color: #1c1c1e;
   }
   @media (prefers-color-scheme: dark) {
@@ -16,77 +16,109 @@
     .card { background: #1c1c1e !important; }
     .muted { color: #98989d !important; }
     code { background: #2c2c2e !important; }
+    th { background: #2c2c2e !important; }
+    td, th { border-color: #38383a !important; }
   }
-  h1 { font-size: 22px; margin: 0 0 6px; }
-  h2 { font-size: 16px; margin: 28px 0 8px; }
-  p { margin: 8px 0; }
+  h1 { font-size: 21px; margin: 0 0 6px; }
+  h2 { font-size: 17px; margin: 34px 0 10px; padding-top: 14px; border-top: 1px solid #e5e5ea; }
+  p { margin: 9px 0; }
   .muted { color: #6c6c70; font-size: 14px; }
-  a.btn {
-    display: block; text-align: center; text-decoration: none;
-    background: #0a84ff; color: #fff; padding: 16px; border-radius: 12px;
-    font-size: 17px; font-weight: 600; margin: 22px 0 10px;
-  }
-  a.btn:active { background: #0060df; }
   .card { background: #f2f2f7; border-radius: 12px; padding: 14px 16px; margin: 14px 0; }
   ol, ul { padding-left: 22px; margin: 8px 0; }
-  li { margin: 5px 0; }
-  code { background: #e5e5ea; padding: 2px 6px; border-radius: 4px; font-size: 14px; }
-  .warn { border-left: 3px solid #ff9f0a; padding-left: 12px; }
+  li { margin: 6px 0; }
+  code { background: #e5e5ea; padding: 2px 6px; border-radius: 4px; font-size: 14px;
+         word-break: break-all; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; margin: 10px 0; }
+  th { background: #e5e5ea; text-align: left; padding: 8px 10px; font-weight: 600; }
+  td { padding: 8px 10px; border-top: 1px solid #e5e5ea; vertical-align: top; }
+  .ok { border-left: 3px solid #30d158; padding-left: 12px; }
 </style>
 </head>
 <body>
 
 <h1>响课 · 开关闹钟</h1>
-<p class="muted">每天自动开关「时钟」里那 6 个课表闹钟。不打开任何 App，<b>锁屏时也能跑</b>。</p>
-
-<a class="btn" href="shortcuts://import-shortcut/?url=https%3A%2F%2Fraw.githubusercontent.com%2Fyhgeo%2Fios-class-alarm%2Fmain%2FXiangKeAlarms.shortcut&amp;name=%E5%93%8D%E8%AF%BE%E5%BC%80%E5%85%B3%E9%97%B9%E9%92%9F">导入到「快捷指令」</a>
-
-<p class="muted">点了没反应？先做这一步再点：<br>
-<code>设置 → 快捷指令 → 允许不受信任的快捷指令</code>（打开）</p>
-
-<h2>导入后要做两件事</h2>
-
-<div class="card warn">
-  <b>① 选闹钟（必做）</b><br>
-  快捷指令里有 12 个「开关闹钟」动作，它们的闹钟选择器是空的 ——
-  因为闹钟引用跟设备绑定，没法预先写好。<br><br>
-  逐个点开，从列表里选：
-  <ul>
-    <li>第 <b>1～6</b> 个（动作设为「关闭」）：<code>课表 07:50</code>、<code>课表 09:45</code>、<code>课表 10:00</code>、<code>课表 13:30</code>、<code>课表 15:25</code>、<code>课表 18:00</code></li>
-    <li>第 <b>7～12</b> 个（在各自的「如果」里，动作设为「打开」）：同上，一一对应</li>
-  </ul>
-  前提：这 6 个闹钟得先在「时钟」里建好（见下方）。
-</div>
+<p class="muted">每天自动开关「时钟」里那 2 个早课闹钟。不打开任何 App，<b>锁屏时也能跑</b>。</p>
 
 <div class="card">
-  <b>② 建自动化</b>
-  <ol>
-    <li>「快捷指令」→ 自动化 → <code>+</code> → 特定时间 → 每天 <code>22:00</code></li>
-    <li>动作选刚导入的「响课开关闹钟」</li>
-    <li>关掉「运行前询问」；iOS 16 还要关掉「运行时通知」</li>
-  </ol>
+  <b>为什么是「开关闹钟」而不是「设置闹钟」</b><br>
+  <span class="muted">
+  iOS 锁屏时禁止「打开 App / 打开 URL」，所以唤起响课那条路在锁屏必定失败。
+  但快捷指令的「开关闹钟」动作不需要打开 App —— 锁屏也能执行。<br>
+  于是把问题拆成两半：闹钟<b>预先建好</b>（一次），每天只<b>开一个、关另一个</b>。
+  </span>
 </div>
 
-<h2>前置：时钟里先建 6 个闹钟</h2>
-<p class="muted">「时钟」→ 闹钟 → 新建，重复全部设为<b>不重复</b>：</p>
-<table style="width:100%;border-collapse:collapse;font-size:15px">
-  <tr><th style="text-align:left;padding:6px 0">标签</th><th style="text-align:left">时间</th><th style="text-align:left">对应最早课</th></tr>
-  <tr><td>课表 07:50</td><td>07:50</td><td>08:20</td></tr>
-  <tr><td>课表 09:45</td><td>09:45</td><td>10:15</td></tr>
-  <tr><td>课表 10:00</td><td>10:00</td><td>10:30</td></tr>
-  <tr><td>课表 13:30</td><td>13:30</td><td>14:00</td></tr>
-  <tr><td>课表 15:25</td><td>15:25</td><td>15:55</td></tr>
-  <tr><td>课表 18:00</td><td>18:00</td><td>18:30</td></tr>
+<h2>第 0 步：时钟里建 2 个闹钟</h2>
+
+<p>「时钟」→ 闹钟 → 右上角 <code>+</code>，建两个。<b>重复全部设为「不重复」</b>。</p>
+
+<table>
+  <tr><th>标签</th><th>时间</th><th>对应最早课</th></tr>
+  <tr><td>课表 07:50</td><td>07:50</td><td>08:20 的课</td></tr>
+  <tr><td>课表 09:45</td><td>09:45</td><td>10:15 的课</td></tr>
 </table>
 
-<h2>怎么确认它工作</h2>
-<p>导入后先在快捷指令里<b>手动点一次运行</b>，然后打开「时钟」——
-应该只剩「明天该用的那一个」是开着的。</p>
+<p class="muted">标签照抄，后面在快捷指令里要按它选闹钟。<br>
+其余时段（10:30 / 14:00 / 15:55 / 18:30 开始）<b>不设闹钟</b>。</p>
 
-<p class="muted" style="margin-top:32px">
-  对照表来源：<code>alarms.json</code>（Gist，每天由快捷指令联网获取）。<br>
-  课表变了要重新生成对照表，并重新导入这条快捷指令。
-</p>
+<h2>第 1 步：搭快捷指令</h2>
+
+<p>「快捷指令」→ 右上角 <code>+</code> → 按顺序添加下面 9 个动作。<b>一共只要 11 步操作</b>。</p>
+
+<table>
+  <tr><th>#</th><th>动作</th><th>设置</th></tr>
+  <tr>
+    <td>1</td><td><b>获取 URL 内容</b></td>
+    <td>地址填：<br><code>https://gist.githubusercontent.com/yhgeo/a1319b6b00cf0cd73c19a4b7f0d47fb8/raw/alarms.json</code></td>
+  </tr>
+  <tr><td>2</td><td><b>从输入获取字典</b></td><td>输入 = 上一步的结果（默认就是）</td></tr>
+  <tr><td>3</td><td><b>调整日期</b></td><td>日期 = 当前日期；操作 = 添加；1 天</td></tr>
+  <tr><td>4</td><td><b>格式化日期</b></td><td>日期 = 上一步结果；格式选「自定义」，填 <code>yyyy-MM-dd</code></td></tr>
+  <tr><td>5</td><td><b>获取字典值</b></td><td>从第 2 步的字典里，取第 4 步结果这个键 → 得到明天该用的时间</td></tr>
+  <tr><td>6</td><td><b>开关闹钟</b></td><td>闹钟选「课表 07:50」，操作 = <b>关闭</b></td></tr>
+  <tr><td>7</td><td><b>开关闹钟</b></td><td>闹钟选「课表 09:45」，操作 = <b>关闭</b></td></tr>
+  <tr>
+    <td>8</td><td><b>如果</b></td>
+    <td>条件：第 5 步结果 <b>是</b> <code>07:50</code><br>
+        在里面放一个「开关闹钟」：闹钟选「课表 07:50」，操作 = <b>打开</b></td>
+  </tr>
+  <tr>
+    <td>9</td><td><b>如果</b></td>
+    <td>条件：第 5 步结果 <b>是</b> <code>09:45</code><br>
+        在里面放一个「开关闹钟」：闹钟选「课表 09:45」，操作 = <b>打开</b></td>
+  </tr>
+</table>
+
+<div class="card ok">
+  <b>两个「如果」是互相独立的，不要嵌套</b><br>
+  <span class="muted">先无条件关掉两个，再按匹配结果打开对应的那个。这样不会出现「两个都开着」或「该开的没开」。</span>
+</div>
+
+<p class="muted">表里 <code>""</code>（空字符串）表示当天不用闹钟 —— 两个「如果」都不命中，结果就是两个都关着。正好是对的。</p>
+
+<h2>第 2 步：先手动试一次</h2>
+
+<p>在快捷指令里点一下运行，然后打开「时钟」看：</p>
+<ul>
+  <li>只剩<b>一个</b>闹钟是开着的（明天该用的那个）</li>
+  <li>如果明天不用闹钟 → 两个都关着</li>
+</ul>
+
+<h2>第 3 步：建自动化</h2>
+
+<ol>
+  <li>「快捷指令」→ <b>自动化</b> → <code>+</code> → <b>特定时间</b> → 每天 <code>22:00</code> → 下一步</li>
+  <li>动作选刚才那条快捷指令</li>
+  <li><b>关掉「运行前询问」</b>；iOS 16 还会要求再关掉「运行时通知」</li>
+</ol>
+
+<p class="muted">锁屏时应该也能跑 —— 它不打开任何 App。第二天去时钟里核对一下即可。</p>
+
+<h2>说明</h2>
+<ul class="muted">
+  <li>对照表是<b>预先算好发布</b>的（Gist 里的 <code>alarms.json</code>）。课表或提前量变了要重新生成。</li>
+  <li>「开关闹钟」的闹钟是<b>按引用</b>指定的，所以第 6～9 步必须从列表里选，不能手打标签。</li>
+</ul>
 
 </body>
 </html>

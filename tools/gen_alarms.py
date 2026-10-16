@@ -18,6 +18,12 @@ iOS 锁屏时禁止「打开 App / 打开 URL」，所以 `xiangke://apply` 那�
 用法
 ----
     python gen_alarms.py <timetable.json> [-o alarms.json] [--from 2026-10-16]
+                         [--max-start 10:15]
+
+--max-start 用来「只给早课设闹钟」：当天第一节课的开始时间**晚于**这个值，
+就当没课（表里写空串）。例如课表里上午的最早课是 08:20 / 10:15 / 10:30，
+传 `--max-start 10:15` 就只保留 08:20 和 10:15 两种，得到 2 个闹钟
+（07:50 / 09:45）；10:30 及以后的课都不设闹钟。
 
 输出格式（刻意压到最简，便于快捷指令一次取值）：
     {"2026-10-16": "13:30", "2026-10-17": "13:30", "2026-10-18": ""}
@@ -32,11 +38,13 @@ import json
 import sys
 
 
-def alarm_time(courses, advance):
-    """该天的闹钟时间 HH:MM；无课返回 None"""
+def alarm_time(courses, advance, max_start=None):
+    """该天的闹钟时间 HH:MM；无课（或被 --max-start 滤掉）返回 None"""
     if not courses:
         return None
     first = min(courses, key=lambda c: c['start'])
+    if max_start and first['start'] > max_start:
+        return None
     h, m = (int(x) for x in first['start'].split(':'))
     total = max(0, h * 60 + m - advance)
     return '%02d:%02d' % (total // 60, total % 60)
@@ -48,6 +56,9 @@ def main():
     ap.add_argument('-o', '--output', default='alarms.json', help='输出文件，默认 alarms.json')
     ap.add_argument('--from', dest='start', default=None,
                     help='起始日期 YYYY-MM-DD，默认取「明天」')
+    ap.add_argument('--max-start', dest='max_start', default=None,
+                    help='只给开始时间不晚于该值的课设闹钟（HH:MM），'
+                         '例如 10:15 表示只保留上午最早的两节')
     args = ap.parse_args()
 
     with io.open(args.timetable, encoding='utf-8') as f:
@@ -69,7 +80,7 @@ def main():
     day = start
     while day <= end:
         key = day.isoformat()
-        t = alarm_time(overrides.get(key), advance)
+        t = alarm_time(overrides.get(key), advance, args.max_start)
         table[key] = t or ''
         if t:
             by_time[t] += 1

@@ -15,7 +15,8 @@
 | 快捷指令唤起（URL Scheme） | ✅ 已完成（仅解锁时可用） |
 | 应用名 / 图标 | ✅ 已完成 |
 | 锁屏探针 | ✅ 已完成（实测：数据保护不是障碍） |
-| 快捷指令开关闹钟（锁屏可用） | 🔬 已就绪，待实测 |
+| 快捷指令开关闹钟（锁屏可用） | 🔬 手工搭建，待实测 |
+| 生成快捷指令文件直接导入 | ⛔ 不可能（需 Apple 签名，见下） |
 | 后台自动刷新（BGTaskScheduler） | ⚠️ 实测不可靠（三天未唤醒） |
 | App Intent 动作（锁屏 + 时间精确） | ⛔ 受阻，见下 |
 | 更优雅的重载方式（替代 SIGKILL） | ⬜ 待做 |
@@ -58,16 +59,22 @@
 
 **关键事实**：快捷指令的「开关闹钟」动作**不需要打开 App**，所以锁屏时也能执行。
 
-**关键数据**：课表里**最早课只有 6 种时间**（08:20 / 10:15 / 10:30 / 14:00 / 15:55 / 18:30）。
+**关键数据**：课表里最早课有 6 种时间（08:20 / 10:15 / 10:30 / 14:00 / 15:55 / 18:30）。
 顺带验证过：**不存在单双周规律**（周一的三种时间在单双周里都出现），
 所以「按星期设重复闹钟」这条路走不通 —— 必须逐日判定。
+
+**用户口径**：**只给上午的课设闹钟**，即只保留最早两种（08:20 / 10:15），
+10:30 及以后开始的课不设闹钟。
 
 **于是把问题拆成两半：**
 
 ```
-准备（一次）：时钟里预置 6 个闹钟（6 种最早课时间各减提前量）
-每天（自动）：快捷指令查表 → 打开该用的那个、关掉其余 5 个
+准备（一次）：时钟里预置 2 个闹钟（07:50 / 09:45）
+每天（自动）：快捷指令查表 → 打开该用的那个、关掉另一个
 ```
+
+对照表由 `tools/gen_alarms.py --max-start 10:15` 生成 ——
+`--max-start` 就是「只给不晚于该时间开始的课设闹钟」，去掉即恢复全时段。
 
 「查表」用的表由 `tools/gen_alarms.py` 生成，发布在 Gist
 （`alarms.json`，格式 `{"2026-10-16":"13:30", ...}`，空串表示当天无课）。
@@ -86,11 +93,15 @@
 - 「URL 唤起」的记录全部是 `isProtectedDataAvailable = YES`（即解锁状态）——
   锁屏那次根本没被拉起，与「锁屏禁止打开 URL」完全吻合。
 
-### 快捷指令是生成的，不是手搭的
+### 快捷指令：格式能生成，但导入不了
 
-`tools/make_shortcut.py` 直接产出 `.shortcut` 文件（未签名 XML plist，30 个动作），
-省掉用户手工搭 30 步。格式参考公开逆向资料：`WFWorkflowActions` 数组，
-每个动作是 `WFWorkflowActionIdentifier` + `WFWorkflowActionParameters`；
+> **结论先行：这条路走不通，用户只能手工搭。** 生成器保留下来是作为
+> **动作连线方式的参考**（UUID / 变量引用 / 条件分组怎么写），
+> 以及将来若有 Mac + iCloud，跑一句 `shortcuts sign` 就能产出可导入版本。
+
+`tools/make_shortcut.py` 能产出 `.shortcut` 文件（未签名 XML plist，14 个动作，
+对应用户「只留上午两个闹钟」的口径）。格式参考公开逆向资料：
+`WFWorkflowActions` 数组，每个动作是 `WFWorkflowActionIdentifier` + `WFWorkflowActionParameters`；
 动作间用 `WFTextTokenAttachment`（带 `OutputUUID`）引用输出；
 条件分支用 `WFControlFlowMode`（0=如果 / 1=否则 / 2=结束）+ `GroupingIdentifier` 配对。
 
@@ -107,21 +118,29 @@
 | 如果 | `is.workflow.actions.conditional` |
 | **开关闹钟** | `is.workflow.actions.alarm.toggle`（参数 `WFAlarm` + `WFEnabled`） |
 
-**两处限制**：
+查动作定义最快的方式：`gh api repos/pfgithub/scpl/contents/docs/actions/<动作名>.md`
+（里面有每个动作的 `source json`，直接给出 `Key` 与参数类型）。
 
-1. **闹钟选择器（`WFAlarm`）填不了。** 它存的是设备上那个闹钟的引用，与设备绑定，
-   没法预先写死。所以导入后要逐个点开那 12 个「开关闹钟」手动选 —— 这是唯一的遗留手工步骤。
-2. **签名不可用。** `shortcuts sign --mode anyone` 是 macOS 自带命令，但需要
-   **登录 iCloud**（日志原话：`Error: In order to do this, you must be signed into iCloud.`），
-   CI 机器做不到。所以只能给未签名版本 —— 导入前需在 `设置 → 快捷指令` 打开
-   **「允许不受信任的快捷指令」**。
+**三道坎，最后一道过不去：**
 
-**托管**：`.shortcut` 入库后走 raw 地址；导入入口是 `index.html`（GitHub Pages，
-`https://yhgeo.github.io/ios-class-alarm/`），里面一个 `shortcuts://import-shortcut/?url=...&name=...`
-按钮，手机上点一下就进快捷指令 App。
+1. **闹钟选择器（`WFAlarm`）填不了** —— 它存的是设备上那个闹钟的引用，与设备绑定。
+   不过这条本身不致命：导入后逐个点开手动选即可。
+2. **必须由 Apple 服务器签名才能导入。** `shortcuts sign --mode anyone` 是 macOS
+   自带命令，但**要求登录 iCloud**。CI 日志原话：
+   `Error: In order to do this, you must be signed into iCloud.`
+3. **离线签名也不行。** `0xilis/shortcut-sign` 能签，但 `-k` 需要 **Apple ID 的
+   ECDSA-P256 私钥**、`-a` 需要 auth data，二者都要用 `appleid-key-dumper`
+   从**越狱设备**里导出。本项目只有 TrollStore，不是越狱，拿不到。
 
-> ⚠️ `.gitattributes` 里有 `*.shortcut -text`。签名是对文件内容算的哈希，
-> 换行符转换会让签名失效，必须按二进制处理。
+**实测确认**：用户点导入后，快捷指令 App 提示「格式不正确」—— 就是签名这一关。
+
+**现状**：`.shortcut` 产物已从仓库移除（生成物，已加 .gitignore）。
+`index.html`（GitHub Pages，`https://yhgeo.github.io/ios-class-alarm/`）
+从「导入页」改成了**手机上照着做的图文搭建指南** —— 改成只留 2 个闹钟后，
+手工搭建只剩 9 个动作块 / 11 步操作，可接受。
+
+> ⚠️ 若将来重新启用签名流程：`.gitattributes` 里要有 `*.shortcut -text`。
+> 签名是对文件内容算的哈希，换行符转换会让签名失效。
 
 ## 工作原理
 
