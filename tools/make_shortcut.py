@@ -149,7 +149,17 @@ lookup = emit(
     output_name="闹钟时间",
 )
 
-# ---------------------------------------------------------------- 7. 先全部关掉
+# ---------------------------------------------------------------- 7. 转成文本
+# 「词典值」的输出类型不确定（可能是文本 / 数字 / 日期 / 词典），
+# Shortcuts 在「如果」里只会给「有任何值 / 没有值」两个通用条件 —— 没有「是」。
+# 套一层「文本」把它变成明确的 NSString，条件里才会出现「是 / 不是 / 包含 …」。
+text_uid = emit(
+    "is.workflow.actions.gettext",
+    {"WFTextActionText": ref_output(lookup, "Dictionary Value")},
+    output_name="时间文本",
+)
+
+# ---------------------------------------------------------------- 8. 先全部关掉
 # WFAlarm 留空 —— 闹钟引用是设备相关的，导入后由用户逐个选
 for t in ALARM_TIMES:
     emit(
@@ -158,15 +168,15 @@ for t in ALARM_TIMES:
         output_name=f"关闭 {t}",
     )
 
-# ---------------------------------------------------------------- 8. 匹配的打开
-# 6 个互相独立的「如果」，不要嵌套
+# ---------------------------------------------------------------- 9. 匹配的打开
+# 互相独立的「如果」，不要嵌套
 for t in ALARM_TIMES:
     grp = U()
     emit("is.workflow.actions.conditional", {
         "GroupingIdentifier": grp,
         "WFControlFlowMode": 0,          # 0 = 如果
         "WFCondition": 4,                # 4 = 「是」
-        "WFInput": {"Variable": ref_output(lookup, "Dictionary Value")},
+        "WFInput": {"Variable": ref_output(text_uid, "Text")},
         "WFConditionalActionString": t,
     })
     emit(
